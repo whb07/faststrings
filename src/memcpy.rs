@@ -148,13 +148,32 @@ unsafe fn copy_tail_avx2(mut d: *mut u8, mut s: *const u8, mut rem: usize) {
     }
 }
 
+#[target_feature(enable = "avx2")]
+unsafe fn copy_256_avx2(d: *mut u8, s: *const u8) {
+    let v0 = _mm256_loadu_si256(s as *const __m256i);
+    let v1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
+    let v2 = _mm256_loadu_si256(s.add(64) as *const __m256i);
+    let v3 = _mm256_loadu_si256(s.add(96) as *const __m256i);
+    let v4 = _mm256_loadu_si256(s.add(128) as *const __m256i);
+    let v5 = _mm256_loadu_si256(s.add(160) as *const __m256i);
+    let v6 = _mm256_loadu_si256(s.add(192) as *const __m256i);
+    let v7 = _mm256_loadu_si256(s.add(224) as *const __m256i);
+    _mm256_storeu_si256(d as *mut __m256i, v0);
+    _mm256_storeu_si256(d.add(32) as *mut __m256i, v1);
+    _mm256_storeu_si256(d.add(64) as *mut __m256i, v2);
+    _mm256_storeu_si256(d.add(96) as *mut __m256i, v3);
+    _mm256_storeu_si256(d.add(128) as *mut __m256i, v4);
+    _mm256_storeu_si256(d.add(160) as *mut __m256i, v5);
+    _mm256_storeu_si256(d.add(192) as *mut __m256i, v6);
+    _mm256_storeu_si256(d.add(224) as *mut __m256i, v7);
+}
+
 // =============================================================================
 // AVX DISPATCHER: Centralizes AVX state and manages VZEROUPPER
 // =============================================================================
 
-// Non-temporal stores regress around the 8 MiB transition on current targets.
-// Keep NT for very large copies only so the cached AVX2 path handles mid/large
-// working sets without a threshold cliff.
+// Non-temporal stores regress around the multi-MiB transition on current
+// targets; keep NT for very large copies only.
 const NT_THRESHOLD: usize = 16 * 1024 * 1024;
 
 #[target_feature(enable = "avx2")]
@@ -190,27 +209,60 @@ unsafe fn optimized_memcpy_avx2_unaligned(dest: *mut u8, src: *const u8, n: usiz
         return dest;
     }
 
-    // 2. INTERMEDIATE PATH: Unaligned loop for 129B-512B.
-    // In this range, the cost of the alignment prologue is higher than the benefit
-    // of aligned stores. We use 128-byte unrolled chunks.
+    // 2. INTERMEDIATE PATH: Branchless overlap for 129B-256B.
+    if n <= 256 {
+        // Head 128B
+        let h0 = _mm256_loadu_si256(src as *const __m256i);
+        let h1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
+        let h2 = _mm256_loadu_si256(src.add(64) as *const __m256i);
+        let h3 = _mm256_loadu_si256(src.add(96) as *const __m256i);
+        _mm256_storeu_si256(dest as *mut __m256i, h0);
+        _mm256_storeu_si256(dest.add(32) as *mut __m256i, h1);
+        _mm256_storeu_si256(dest.add(64) as *mut __m256i, h2);
+        _mm256_storeu_si256(dest.add(96) as *mut __m256i, h3);
+
+        // Tail 128B
+        let ts = src.add(n - 128);
+        let td = dest.add(n - 128);
+        let t0 = _mm256_loadu_si256(ts as *const __m256i);
+        let t1 = _mm256_loadu_si256(ts.add(32) as *const __m256i);
+        let t2 = _mm256_loadu_si256(ts.add(64) as *const __m256i);
+        let t3 = _mm256_loadu_si256(ts.add(96) as *const __m256i);
+        _mm256_storeu_si256(td as *mut __m256i, t0);
+        _mm256_storeu_si256(td.add(32) as *mut __m256i, t1);
+        _mm256_storeu_si256(td.add(64) as *mut __m256i, t2);
+        _mm256_storeu_si256(td.add(96) as *mut __m256i, t3);
+        return dest;
+    }
+
+    // 3. INTERMEDIATE PATH: Branchless overlap for 257B-512B.
     if n <= 512 {
+        if n == 512 {
+            copy_256_avx2(dest, src);
+            copy_256_avx2(dest.add(256), src.add(256));
+            return dest;
+        }
+
+        // Head 256B
+        copy_256_avx2(dest, src);
+
+        // Remainder (1..=256B)
+        let rem = n - 256;
+        copy_tail_avx2(dest.add(256), src.add(256), rem);
+        return dest;
+    }
+
+    // 4. LARGE-NEAR PATH: Unaligned loop for 513B-1024B.
+    // Avoids alignment-prologue overhead in this transition zone.
+    if n <= 1024 {
         let mut d = dest;
         let mut s = src;
         let mut rem = n;
-        while rem >= 128 {
-            // SAFETY: Unaligned loads/stores are valid for any alignment; caller
-            // guarantees `src`/`dest` are valid for the loop span.
-            let v0 = _mm256_loadu_si256(s as *const __m256i);
-            let v1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
-            let v2 = _mm256_loadu_si256(s.add(64) as *const __m256i);
-            let v3 = _mm256_loadu_si256(s.add(96) as *const __m256i);
-            _mm256_storeu_si256(d as *mut __m256i, v0);
-            _mm256_storeu_si256(d.add(32) as *mut __m256i, v1);
-            _mm256_storeu_si256(d.add(64) as *mut __m256i, v2);
-            _mm256_storeu_si256(d.add(96) as *mut __m256i, v3);
-            d = d.add(128);
-            s = s.add(128);
-            rem -= 128;
+        while rem >= 256 {
+            copy_256_avx2(d, s);
+            d = d.add(256);
+            s = s.add(256);
+            rem -= 256;
         }
         if rem > 0 {
             copy_tail_avx2(d, s, rem);
@@ -218,7 +270,7 @@ unsafe fn optimized_memcpy_avx2_unaligned(dest: *mut u8, src: *const u8, n: usiz
         return dest;
     }
 
-    // 3. LARGE PATH: Aligned loop for n > 512.
+    // 5. LARGE PATH: Aligned loop for n > 1024.
     let mut d = dest;
     let mut s = src;
     let mut rem = n;

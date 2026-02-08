@@ -107,6 +107,18 @@ unsafe fn memset_tail_avx2(mut d: *mut u8, v: __m256i, value: u8, mut rem: usize
     }
 }
 
+#[target_feature(enable = "avx2")]
+unsafe fn memset_store_256_avx2(dest: *mut u8, v: __m256i) {
+    _mm256_storeu_si256(dest as *mut __m256i, v);
+    _mm256_storeu_si256(dest.add(32) as *mut __m256i, v);
+    _mm256_storeu_si256(dest.add(64) as *mut __m256i, v);
+    _mm256_storeu_si256(dest.add(96) as *mut __m256i, v);
+    _mm256_storeu_si256(dest.add(128) as *mut __m256i, v);
+    _mm256_storeu_si256(dest.add(160) as *mut __m256i, v);
+    _mm256_storeu_si256(dest.add(192) as *mut __m256i, v);
+    _mm256_storeu_si256(dest.add(224) as *mut __m256i, v);
+}
+
 // =============================================================================
 // AVX DISPATCHER: Centralizes AVX state and manages VZEROUPPER
 // =============================================================================
@@ -149,6 +161,13 @@ unsafe fn optimized_memset_avx2(dest: *mut u8, value: u8, n: usize) {
         _mm256_storeu_si256(dest.add(n - 96) as *mut __m256i, v);
         _mm256_storeu_si256(dest.add(n - 64) as *mut __m256i, v);
         _mm256_storeu_si256(dest.add(n - 32) as *mut __m256i, v);
+        return;
+    }
+
+    if n >= 480 && n <= 512 {
+        // Copy both ends to avoid loop/tail overhead near the 512-byte cliff.
+        memset_store_256_avx2(dest, v);
+        memset_store_256_avx2(dest.add(n - 256), v);
         return;
     }
 

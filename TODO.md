@@ -11,7 +11,7 @@
 | Function | Standard/Origin | Implemented | Benchmarked | Faster than glibc | Notes |
 |---|---|---:|---:|---:|---|
 | `memcpy` | C/POSIX | yes | yes | no | AVX2 tuned with 63/64-byte cliff handling; latest full run wins 46/62 but still loses on several 95-1024B cases and 8MiB +/- 1 |
-| `memmove` | C/POSIX | yes | no | unknown |  |
+| `memmove` | C/POSIX | yes | partial | no | New AVX2+`rep movsb` overlap-aware path benchmarked on targeted subset; current result wins 3/16, with major backward-overlap regressions (1024B and 256KiB cases) |
 | `memset` | C/POSIX | yes | yes | no | AVX2/NT tuned; latest full run wins 53/68 with remaining misses around 64B misalignment, 511B, and ~256KiB |
 | `memcmp` | C/POSIX | yes | no | unknown |  |
 | `memchr` | C/POSIX | yes | no | unknown |  |

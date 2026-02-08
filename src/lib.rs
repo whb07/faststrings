@@ -4,6 +4,7 @@ pub mod bcopy;
 pub mod ffs;
 pub mod mem;
 pub mod memcpy;
+pub mod memmove;
 pub mod memset;
 pub mod search;
 pub mod simd;

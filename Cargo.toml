@@ -15,3 +15,7 @@ harness = false
 [[bench]]
 name = "memset"
 harness = false
+
+[[bench]]
+name = "memmove"
+harness = false

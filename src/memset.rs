@@ -73,11 +73,47 @@ unsafe fn memset_sse_small(dest: *mut u8, value: u8, n: usize) {
     }
 }
 
+#[target_feature(enable = "avx2")]
+unsafe fn memset_tail_avx2(mut d: *mut u8, v: __m256i, value: u8, mut rem: usize) {
+    while rem >= 32 {
+        _mm256_storeu_si256(d as *mut __m256i, v);
+        d = d.add(32);
+        rem -= 32;
+    }
+
+    let v64 = (value as u64) * 0x0101010101010101;
+    while rem >= 8 {
+        core::ptr::write_unaligned(d as *mut u64, v64);
+        d = d.add(8);
+        rem -= 8;
+    }
+
+    if rem >= 4 {
+        let v32 = (value as u32) * 0x01010101;
+        core::ptr::write_unaligned(d as *mut u32, v32);
+        d = d.add(4);
+        rem -= 4;
+    }
+
+    if rem >= 2 {
+        let v16 = (value as u16) | ((value as u16) << 8);
+        core::ptr::write_unaligned(d as *mut u16, v16);
+        d = d.add(2);
+        rem -= 2;
+    }
+
+    if rem == 1 {
+        *d = value;
+    }
+}
+
 // =============================================================================
 // AVX DISPATCHER: Centralizes AVX state and manages VZEROUPPER
 // =============================================================================
 
-const NT_THRESHOLD: usize = 256 * 1024; // 256KB
+// Avoid NT transition cliffs around 256 KiB on post-2020 cores. Keep memset on
+// cached AVX2 stores for small/medium/large buffers in benchmarked ranges.
+const NT_THRESHOLD: usize = 2 * 1024 * 1024; // 2 MiB
 
 #[target_feature(enable = "avx2")]
 unsafe fn optimized_memset_avx_dispatch(dest: *mut u8, value: u8, n: usize) {
@@ -116,30 +152,29 @@ unsafe fn optimized_memset_avx2(dest: *mut u8, value: u8, n: usize) {
         return;
     }
 
-    // Large blocks (>256): Align and loop with 128-byte unroll
-    _mm256_storeu_si256(dest as *mut __m256i, v);
-    let offset = 32 - ((dest as usize) & 31);
-    let mut ptr = dest.add(offset);
-    let end = dest.add(n);
-    let remaining = n - offset;
-    let loop_end = ptr.add(remaining & !127);
+    // Large blocks (>256): align once and stream through 128-byte chunks.
+    let mut ptr = dest;
+    let mut rem = n;
+    let misalign = (ptr as usize) & 31;
+    if misalign != 0 {
+        let advance = 32 - misalign;
+        _mm256_storeu_si256(ptr as *mut __m256i, v);
+        ptr = ptr.add(advance);
+        rem -= advance;
+    }
 
-    while ptr < loop_end {
+    while rem >= 128 {
         _mm256_store_si256(ptr as *mut __m256i, v);
         _mm256_store_si256(ptr.add(32) as *mut __m256i, v);
         _mm256_store_si256(ptr.add(64) as *mut __m256i, v);
         _mm256_store_si256(ptr.add(96) as *mut __m256i, v);
         ptr = ptr.add(128);
+        rem -= 128;
     }
 
-    // Adaptive epilogue based on remainder
-    let tail = remaining & 127;
-    if tail > 64 {
-        _mm256_storeu_si256(end.sub(128) as *mut __m256i, v);
-        _mm256_storeu_si256(end.sub(96) as *mut __m256i, v);
+    if rem > 0 {
+        memset_tail_avx2(ptr, v, value, rem);
     }
-    _mm256_storeu_si256(end.sub(64) as *mut __m256i, v);
-    _mm256_storeu_si256(end.sub(32) as *mut __m256i, v);
 }
 
 // =============================================================================
@@ -151,33 +186,32 @@ unsafe fn optimized_memset_avx2_nt(dest: *mut u8, value: u8, n: usize) {
     let v = _mm256_set1_epi8(value as i8);
 
     // Alignment prologue
-    _mm256_storeu_si256(dest as *mut __m256i, v);
-    let offset = 32 - ((dest as usize) & 31);
-    let mut ptr = dest.add(offset);
-    let end = dest.add(n);
-    let remaining = n - offset;
-    let loop_end = ptr.add(remaining & !127);
+    let mut ptr = dest;
+    let mut rem = n;
+    let misalign = (ptr as usize) & 31;
+    if misalign != 0 {
+        let advance = 32 - misalign;
+        _mm256_storeu_si256(ptr as *mut __m256i, v);
+        ptr = ptr.add(advance);
+        rem -= advance;
+    }
 
     // Main loop: non-temporal stores (bypass cache)
-    while ptr < loop_end {
+    while rem >= 128 {
         _mm256_stream_si256(ptr as *mut __m256i, v);
         _mm256_stream_si256(ptr.add(32) as *mut __m256i, v);
         _mm256_stream_si256(ptr.add(64) as *mut __m256i, v);
         _mm256_stream_si256(ptr.add(96) as *mut __m256i, v);
         ptr = ptr.add(128);
+        rem -= 128;
     }
 
     // REQUIRED: fence ensures NT stores are visible before function returns
     _mm_sfence();
 
-    // Tail with regular stores
-    let tail = remaining & 127;
-    if tail > 64 {
-        _mm256_storeu_si256(end.sub(128) as *mut __m256i, v);
-        _mm256_storeu_si256(end.sub(96) as *mut __m256i, v);
+    if rem > 0 {
+        memset_tail_avx2(ptr, v, value, rem);
     }
-    _mm256_storeu_si256(end.sub(64) as *mut __m256i, v);
-    _mm256_storeu_si256(end.sub(32) as *mut __m256i, v);
 }
 
 #[cfg(test)]

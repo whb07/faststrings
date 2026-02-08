@@ -9,5 +9,9 @@ edition = "2024"
 criterion = "0.5"
 
 [[bench]]
-name = "string_ops"
+name = "memcpy"
+harness = false
+
+[[bench]]
+name = "memset"
 harness = false

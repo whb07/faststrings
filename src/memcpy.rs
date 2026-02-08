@@ -101,11 +101,61 @@ unsafe fn optimized_memcpy_sse_small(dest: *mut u8, src: *const u8, n: usize) ->
     dest
 }
 
+#[target_feature(enable = "avx2")]
+unsafe fn copy_tail_avx2(mut d: *mut u8, mut s: *const u8, mut rem: usize) {
+    while rem >= 32 {
+        let v = _mm256_loadu_si256(s as *const __m256i);
+        _mm256_storeu_si256(d as *mut __m256i, v);
+        d = d.add(32);
+        s = s.add(32);
+        rem -= 32;
+    }
+
+    if rem >= 16 {
+        let v = _mm_loadu_si128(s as *const __m128i);
+        _mm_storeu_si128(d as *mut __m128i, v);
+        d = d.add(16);
+        s = s.add(16);
+        rem -= 16;
+    }
+
+    if rem >= 8 {
+        let v = core::ptr::read_unaligned(s as *const u64);
+        core::ptr::write_unaligned(d as *mut u64, v);
+        d = d.add(8);
+        s = s.add(8);
+        rem -= 8;
+    }
+
+    if rem >= 4 {
+        let v = core::ptr::read_unaligned(s as *const u32);
+        core::ptr::write_unaligned(d as *mut u32, v);
+        d = d.add(4);
+        s = s.add(4);
+        rem -= 4;
+    }
+
+    if rem >= 2 {
+        let v = core::ptr::read_unaligned(s as *const u16);
+        core::ptr::write_unaligned(d as *mut u16, v);
+        d = d.add(2);
+        s = s.add(2);
+        rem -= 2;
+    }
+
+    if rem == 1 {
+        *d = *s;
+    }
+}
+
 // =============================================================================
 // AVX DISPATCHER: Centralizes AVX state and manages VZEROUPPER
 // =============================================================================
 
-const NT_THRESHOLD: usize = 8 * 1024 * 1024;
+// Non-temporal stores regress around the 8 MiB transition on current targets.
+// Keep NT for very large copies only so the cached AVX2 path handles mid/large
+// working sets without a threshold cliff.
+const NT_THRESHOLD: usize = 16 * 1024 * 1024;
 
 #[target_feature(enable = "avx2")]
 unsafe fn optimized_memcpy_avx_dispatch(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
@@ -163,18 +213,7 @@ unsafe fn optimized_memcpy_avx2_unaligned(dest: *mut u8, src: *const u8, n: usiz
             rem -= 128;
         }
         if rem > 0 {
-            let s_tail = src.add(n - 128);
-            let d_tail = dest.add(n - 128);
-            // SAFETY: Unaligned loads/stores are valid for any alignment; caller
-            // guarantees tail ranges are within `n` bytes.
-            let v0 = _mm256_loadu_si256(s_tail as *const __m256i);
-            let v1 = _mm256_loadu_si256(s_tail.add(32) as *const __m256i);
-            let v2 = _mm256_loadu_si256(s_tail.add(64) as *const __m256i);
-            let v3 = _mm256_loadu_si256(s_tail.add(96) as *const __m256i);
-            _mm256_storeu_si256(d_tail as *mut __m256i, v0);
-            _mm256_storeu_si256(d_tail.add(32) as *mut __m256i, v1);
-            _mm256_storeu_si256(d_tail.add(64) as *mut __m256i, v2);
-            _mm256_storeu_si256(d_tail.add(96) as *mut __m256i, v3);
+            copy_tail_avx2(d, s, rem);
         }
         return dest;
     }
@@ -185,14 +224,15 @@ unsafe fn optimized_memcpy_avx2_unaligned(dest: *mut u8, src: *const u8, n: usiz
     let mut rem = n;
 
     // Alignment prologue
-    // SAFETY: Unaligned load/store are valid for any alignment; caller guarantees
-    // `src`/`dest` are valid for `n` bytes.
-    let first_v = _mm256_loadu_si256(s as *const __m256i);
-    _mm256_storeu_si256(d as *mut __m256i, first_v);
-    let advance = 32 - ((d as usize) & 31);
-    d = d.add(advance);
-    s = s.add(advance);
-    rem -= advance;
+    let misalign = (d as usize) & 31;
+    if misalign != 0 {
+        let advance = 32 - misalign;
+        let first_v = _mm256_loadu_si256(s as *const __m256i);
+        _mm256_storeu_si256(d as *mut __m256i, first_v);
+        d = d.add(advance);
+        s = s.add(advance);
+        rem -= advance;
+    }
 
     // Main loop with aligned stores (256B unroll)
     while rem >= 256 {
@@ -223,29 +263,9 @@ unsafe fn optimized_memcpy_avx2_unaligned(dest: *mut u8, src: *const u8, n: usiz
         rem -= 256;
     }
 
-    // Overlapping tail
+    // Sequential tail
     if rem > 0 {
-        let s_tail = src.add(n - 256);
-        let d_tail = dest.add(n - 256);
-        // SAFETY: Unaligned loads/stores are valid for any alignment; caller
-        // guarantees tail ranges are within `n` bytes.
-        let v0 = _mm256_loadu_si256(s_tail as *const __m256i);
-        let v1 = _mm256_loadu_si256(s_tail.add(32) as *const __m256i);
-        let v2 = _mm256_loadu_si256(s_tail.add(64) as *const __m256i);
-        let v3 = _mm256_loadu_si256(s_tail.add(96) as *const __m256i);
-        let v4 = _mm256_loadu_si256(s_tail.add(128) as *const __m256i);
-        let v5 = _mm256_loadu_si256(s_tail.add(160) as *const __m256i);
-        let v6 = _mm256_loadu_si256(s_tail.add(192) as *const __m256i);
-        let v7 = _mm256_loadu_si256(s_tail.add(224) as *const __m256i);
-
-        _mm256_storeu_si256(d_tail as *mut __m256i, v0);
-        _mm256_storeu_si256(d_tail.add(32) as *mut __m256i, v1);
-        _mm256_storeu_si256(d_tail.add(64) as *mut __m256i, v2);
-        _mm256_storeu_si256(d_tail.add(96) as *mut __m256i, v3);
-        _mm256_storeu_si256(d_tail.add(128) as *mut __m256i, v4);
-        _mm256_storeu_si256(d_tail.add(160) as *mut __m256i, v5);
-        _mm256_storeu_si256(d_tail.add(192) as *mut __m256i, v6);
-        _mm256_storeu_si256(d_tail.add(224) as *mut __m256i, v7);
+        copy_tail_avx2(d, s, rem);
     }
     dest
 }
@@ -292,20 +312,7 @@ unsafe fn optimized_memcpy_avx2_nt(dest: *mut u8, src: *const u8, n: usize) -> *
 
     // Tail with regular stores (small, OK to cache)
     if rem > 0 {
-        let s_tail = src.add(n - 128);
-        let d_tail = dest.add(n - 128);
-
-        // SAFETY: Unaligned loads/stores are valid for any alignment; caller
-        // guarantees tail ranges are within `n` bytes.
-        let v0 = _mm256_loadu_si256(s_tail as *const __m256i);
-        let v1 = _mm256_loadu_si256(s_tail.add(32) as *const __m256i);
-        let v2 = _mm256_loadu_si256(s_tail.add(64) as *const __m256i);
-        let v3 = _mm256_loadu_si256(s_tail.add(96) as *const __m256i);
-
-        _mm256_storeu_si256(d_tail as *mut __m256i, v0);
-        _mm256_storeu_si256(d_tail.add(32) as *mut __m256i, v1);
-        _mm256_storeu_si256(d_tail.add(64) as *mut __m256i, v2);
-        _mm256_storeu_si256(d_tail.add(96) as *mut __m256i, v3);
+        copy_tail_avx2(d, s, rem);
     }
 
     // REQUIRED: fence ensures NT stores are visible before function returns

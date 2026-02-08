@@ -14,7 +14,7 @@ use core::arch::x86_64::*;
 /// - AVX2 must be supported if the AVX2 path is taken
 #[inline(always)]
 pub unsafe fn optimized_memcpy_unified(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
-    if n <= 64 {
+    if n <= 62 {
         // SSE/Scalar path: Legacy SSE encoding, no transition penalty.
         // Handles up to 64 bytes to avoid AVX entry fee for cache-line sized moves.
         optimized_memcpy_sse_small(dest, src, n)
@@ -168,6 +168,22 @@ unsafe fn copy_256_avx2(d: *mut u8, s: *const u8) {
     _mm256_storeu_si256(d.add(224) as *mut __m256i, v7);
 }
 
+#[target_feature(enable = "avx2")]
+unsafe fn copy_64_avx2(d: *mut u8, s: *const u8) {
+    let v0 = _mm256_loadu_si256(s as *const __m256i);
+    let v1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
+    _mm256_storeu_si256(d as *mut __m256i, v0);
+    _mm256_storeu_si256(d.add(32) as *mut __m256i, v1);
+}
+
+#[target_feature(enable = "avx2")]
+unsafe fn copy_63_avx2(d: *mut u8, s: *const u8) {
+    let v0 = _mm256_loadu_si256(s as *const __m256i);
+    let v1 = _mm256_loadu_si256(s.add(31) as *const __m256i);
+    _mm256_storeu_si256(d as *mut __m256i, v0);
+    _mm256_storeu_si256(d.add(31) as *mut __m256i, v1);
+}
+
 // =============================================================================
 // AVX DISPATCHER: Centralizes AVX state and manages VZEROUPPER
 // =============================================================================
@@ -193,6 +209,16 @@ unsafe fn optimized_memcpy_avx_dispatch(dest: *mut u8, src: *const u8, n: usize)
 
 #[target_feature(enable = "avx2")]
 unsafe fn optimized_memcpy_avx2_unaligned(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    if n == 63 {
+        copy_63_avx2(dest, src);
+        return dest;
+    }
+
+    if n == 64 {
+        copy_64_avx2(dest, src);
+        return dest;
+    }
+
     // 1. TINY/MEDIUM PATH: Branchless overlapping for 65B-128B.
     if n <= 128 {
         // SAFETY: Unaligned AVX loads/stores are valid for any alignment; caller

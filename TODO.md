@@ -10,9 +10,9 @@
 ## Narrow String and Memory APIs
 | Function | Standard/Origin | Implemented | Benchmarked | Faster than glibc | Notes |
 |---|---|---:|---:|---:|---|
-| `memcpy` | C/POSIX | yes | yes | no | AVX2/NT tuned; current suite still has specific alignment-size regressions vs glibc |
+| `memcpy` | C/POSIX | yes | yes | no | AVX2 tuned with 63/64-byte cliff handling; latest full run wins 46/62 but still loses on several 95-1024B cases and 8MiB +/- 1 |
 | `memmove` | C/POSIX | yes | no | unknown |  |
-| `memset` | C/POSIX | yes | yes | no | AVX2/NT tuned; strong aggregate wins but not yet consistently faster across all tracked cases |
+| `memset` | C/POSIX | yes | yes | no | AVX2/NT tuned; latest full run wins 53/68 with remaining misses around 64B misalignment, 511B, and ~256KiB |
 | `memcmp` | C/POSIX | yes | no | unknown |  |
 | `memchr` | C/POSIX | yes | no | unknown |  |
 | `memrchr` | GNU/POSIX ext | yes | no | unknown |  |

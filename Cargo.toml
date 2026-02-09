@@ -47,3 +47,7 @@ harness = false
 [[bench]]
 name = "memmem"
 harness = false
+
+[[bench]]
+name = "strlen"
+harness = false

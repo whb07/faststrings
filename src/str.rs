@@ -16,7 +16,7 @@
 /// assert_eq!(strlen(b"hello"), 5); // no null terminator
 /// ```
 pub fn strlen(s: &[u8]) -> usize {
-    s.iter().position(|&b| b == 0).unwrap_or(s.len())
+    crate::mem::memchr(s, 0).unwrap_or(s.len())
 }
 
 /// Calculate bounded length of a null-terminated string
@@ -31,7 +31,7 @@ pub fn strlen(s: &[u8]) -> usize {
 /// ```
 pub fn strnlen(s: &[u8], maxlen: usize) -> usize {
     let limit = s.len().min(maxlen);
-    s[..limit].iter().position(|&b| b == 0).unwrap_or(limit)
+    crate::mem::memchr(&s[..limit], 0).unwrap_or(limit)
 }
 
 /// Version-aware string comparison (musl-compatible).

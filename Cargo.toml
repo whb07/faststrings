@@ -83,3 +83,7 @@ harness = false
 [[bench]]
 name = "wide_str"
 harness = false
+
+[[bench]]
+name = "strerror"
+harness = false

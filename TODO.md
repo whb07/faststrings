@@ -54,8 +54,8 @@
 | `strxfrm` | C/POSIX | yes | partial | no | Dedicated benchmark run is 4/6 wins in C-locale copy-like cases, but 4KiB paths still regress so this is not a consistent overall win |
 | `strdup` | POSIX | yes | partial | no | Dedicated benchmark run is 1/3 wins; very strong large-string win, but small/medium sizes remain slower overall |
 | `strndup` | POSIX | yes | partial | no | Dedicated benchmark run is 0/6 wins; truncating and full-dup scenarios all regress versus glibc |
-| `strerror` | C/POSIX | no | no | unknown | deferred for now |
-| `strerror_r` | POSIX | no | no | unknown | deferred for now |
+| `strerror` | C/POSIX | yes | partial | yes | New dedicated benchmark run is 6/6 wins (known + unknown errno cases), but coverage is still a focused subset |
+| `strerror_r` | POSIX | yes | partial | yes | New dedicated benchmark run is 6/6 wins across fit/tight known and unknown cases; broader locale/platform coverage still pending |
 
 ## Wide String and Wide Memory APIs
 | Function | Standard/Origin | Implemented | Benchmarked | Faster than glibc | Notes |

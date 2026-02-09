@@ -31,3 +31,7 @@ harness = false
 [[bench]]
 name = "ffs"
 harness = false
+
+[[bench]]
+name = "bcopy"
+harness = false

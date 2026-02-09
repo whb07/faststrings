@@ -21,7 +21,7 @@
 | `explicit_bzero` | BSD/GNU ext | yes | no | unknown |  |
 | `bzero` | BSD legacy | yes | no | unknown |  |
 | `bcmp` | BSD legacy | yes | no | unknown |  |
-| `bcopy` | BSD legacy | yes | no | unknown |  |
+| `bcopy` | BSD legacy | yes | partial | no | Delegating to current optimized memmove path yields 16/30 wins in focused overlap/non-overlap runs; backward-overlap at 1KiB/64KiB regresses heavily (~2.2-2.5x) |
 | `ffs` | POSIX | yes | yes | no | Dedicated value-pattern benchmark completed; current run is 21/44 wins with sub-1.1% deltas, so this is near parity rather than a consistent glibc win |
 | `strlen` | C/POSIX | yes | no | unknown |  |
 | `strnlen` | POSIX | yes | no | unknown |  |

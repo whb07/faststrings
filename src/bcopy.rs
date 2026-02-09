@@ -10,9 +10,9 @@ pub fn bcopy(src: &[u8], dest: &mut [u8]) -> usize {
     }
 
     // SAFETY: Pointers are derived from valid slices with at least `n` bytes.
-    // `ptr::copy` supports overlapping regions by design.
+    // Optimized memmove handles overlap semantics required by bcopy.
     unsafe {
-        core::ptr::copy(src.as_ptr(), dest.as_mut_ptr(), n);
+        crate::memmove::optimized_memmove_unified(dest.as_mut_ptr(), src.as_ptr(), n);
     }
     n
 }

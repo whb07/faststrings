@@ -42,11 +42,11 @@
 | `strchr` | C/POSIX | yes | partial | no | memchr-backed path benchmarked at 0/30 wins; especially severe regressions on early-hit cases (e.g. 64KiB hit-head) and mid/miss scans |
 | `strchrnul` | GNU ext | yes | partial | no | memchr-backed path benchmarked at 0/30 wins; large losses on hit-head and small miss/find-nul scenarios |
 | `strrchr` | C/POSIX | yes | partial | no | memrchr-backed path benchmarked at 0/30 wins; misses and head/mid hit patterns remain significantly behind glibc |
-| `strstr` | C/POSIX | yes | no | unknown |  |
-| `strcasestr` | GNU ext | yes | no | unknown |  |
-| `strspn` | C/POSIX | yes | no | unknown |  |
-| `strcspn` | C/POSIX | yes | no | unknown |  |
-| `strpbrk` | C/POSIX | yes | no | unknown |  |
+| `strstr` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/15 wins; tail/miss scans are substantially behind glibc (worst case ~350x on 4KiB miss path) |
+| `strcasestr` | GNU ext | yes | partial | no | Dedicated benchmark run is 2/15 wins (small hit-head only); most medium/large scans remain slower, including empty-needle cases |
+| `strspn` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/12 wins; current linear `accept.contains` checks regress across all tested sizes |
+| `strcspn` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/12 wins; reject-set membership checks are consistently slower than glibc |
+| `strpbrk` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/12 wins; first/mid/tail and miss patterns all regress versus glibc |
 | `index` | BSD legacy | yes | partial | no | Alias of `strchr`; inherits current `strchr` benchmark profile (0/30 wins) |
 | `rindex` | BSD legacy | yes | partial | no | Alias of `strrchr`; inherits current `strrchr` benchmark profile (0/30 wins) |
 | `strtok` | C/POSIX | yes | no | unknown | safe state-based API |

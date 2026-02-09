@@ -31,14 +31,23 @@ High-ROI execution checklist:
 - [ ] `strlen` tuned + benchmark evidence updated
 - [ ] `strnlen` tuned + benchmark evidence updated
 
+Latest high-ROI snapshot (criterion `new/estimates.json` as of this pass):
+- `memcpy`: wins 49 / 62
+- `memset`: wins 54 / 68
+- `memmove`: wins 53 / 93
+- `memcmp`: wins 26 / 104
+- `memchr`: wins 13 / 116
+- `strlen`: wins 1 / 21
+- `strnlen`: wins 5 / 28
+
 ## Narrow String and Memory APIs
 | Function | Standard/Origin | Implemented | Benchmarked | Faster than glibc | Notes |
 |---|---|---:|---:|---:|---|
 | `memcpy` | C/POSIX | yes | yes | no | AVX2 tuned with 63/64-byte cliff handling; latest full run wins 49/62 with remaining losses centered on 95-1024B cliffs and 8MiB +/- 1 |
-| `memmove` | C/POSIX | yes | partial | no | AVX2 overlap path now uses 1MiB `rep movsb` thresholds; focused 1024B/256KiB subset improved to wins 7/14, but backward-overlap cases still lag badly |
+| `memmove` | C/POSIX | yes | partial | no | Backward overlap path now uses 256B AVX2 descending chunks plus end-alignment, raising the current snapshot to 53/93 wins; still partial with persistent forward 511/512 cliffs and remaining overlap losses |
 | `memset` | C/POSIX | yes | yes | no | AVX2/NT tuned with 480-512-byte fast path; latest full run wins 54/68, with remaining misses around 64B misalignment, 256B alignment corners, and 1MiB |
-| `memcmp` | C/POSIX | yes | partial | no | AVX2 draft + focused benchmark harness are in place; latest captured run is 13/78 wins, with major regressions on 31-256B equal/diff-last paths |
-| `memchr` | C/POSIX | yes | partial | no | AVX2 scan path + criterion harness landed; focused run is 22/54 wins, with regressions concentrated at 31/63B misses and 4KiB full-scan cases |
+| `memcmp` | C/POSIX | yes | partial | no | AVX2 now covers >=32B plus a dedicated 32-64B fast path; latest snapshot is 26/104 wins, but equal/diff-last and alignment-heavy cases remain behind glibc |
+| `memchr` | C/POSIX | yes | partial | no | New small-size AVX2/SSE kernels and first-byte fast path improved 31/63 miss and hit-first cases, but overall snapshot remains 13/116 wins with large miss/tail patterns still lagging |
 | `memrchr` | GNU/POSIX ext | yes | partial | no | AVX2 reverse-scan path + criterion harness landed; focused run is 8/54 wins, with large miss-path regressions (especially 31/63B and 4KiB scans) |
 | `memccpy` | C/POSIX | yes | partial | no | New memchr+copy implementation benchmarked at 12/28 wins; faster on early-stop and large-size misses, but 31/63B stop-last and miss paths regress notably |
 | `memmem` | GNU ext | yes | partial | no | New candidate-filtered memmem path benchmarked at 37/48 wins; strong gains for `needle` lengths >=4, but `needle` length 1 mid/tail/miss scans remain 1.5-2.5x slower |
@@ -47,8 +56,8 @@ High-ROI execution checklist:
 | `bcmp` | BSD legacy | yes | partial | no | New dedicated bench run is 1/28 wins; current memcmp-backed path regresses heavily on 63-256B equal/diff-last cases |
 | `bcopy` | BSD legacy | yes | partial | no | Delegating to current optimized memmove path yields 16/30 wins in focused overlap/non-overlap runs; backward-overlap at 1KiB/64KiB regresses heavily (~2.2-2.5x) |
 | `ffs` | POSIX | yes | yes | no | Dedicated value-pattern benchmark completed; current run is 21/44 wins with sub-1.1% deltas, so this is near parity rather than a consistent glibc win |
-| `strlen` | C/POSIX | yes | partial | no | memchr-backed path benchmarked at 0/21 wins in current C-string cases; biggest losses are mid/tail scans at 1KiB-64KiB |
-| `strnlen` | POSIX | yes | partial | no | memchr-backed path benchmarked at 0/28 wins; especially weak when scanning long bounded ranges and `maxlen`-before-terminator scenarios |
+| `strlen` | C/POSIX | yes | partial | no | Hybrid scan (`testz` AVX2 + memchr-backed medium/large path) now wins head-heavy cases (snapshot 1/21), but mid/tail long scans are still slower than glibc |
+| `strnlen` | POSIX | yes | partial | no | Reuses the updated scan/memchr path and now reaches 5/28 wins in snapshot runs; bounded long-scan and mid-NUL cases remain behind glibc |
 | `strverscmp` | GNU ext | yes | partial | no | Dedicated benchmark run is 2/10 wins; only a couple long-string cases edge out glibc while most numeric/version-ordering cases regress |
 | `strcpy` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/3 wins; copy path remains ~1.4-2.3x slower than glibc across tested sizes |
 | `strncpy` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/6 wins; both truncation and pad cases lag glibc (worst around small pad paths) |

@@ -5,6 +5,7 @@
 
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
+use crate::memchr::optimized_memchr_unified;
 
 #[inline(always)]
 fn has_zero_byte(word: usize) -> bool {
@@ -70,40 +71,47 @@ unsafe fn strlen_scan_avx2(ptr: *const u8, len: usize) -> usize {
         let p2 = ptr.add(i + 64);
         let p3 = ptr.add(i + 96);
 
-        let v0 = _mm256_loadu_si256(p0 as *const __m256i);
-        let m0 = _mm256_movemask_epi8(_mm256_cmpeq_epi8(v0, zero));
+        let e0 = _mm256_cmpeq_epi8(_mm256_loadu_si256(p0 as *const __m256i), zero);
+        let e1 = _mm256_cmpeq_epi8(_mm256_loadu_si256(p1 as *const __m256i), zero);
+        let e2 = _mm256_cmpeq_epi8(_mm256_loadu_si256(p2 as *const __m256i), zero);
+        let e3 = _mm256_cmpeq_epi8(_mm256_loadu_si256(p3 as *const __m256i), zero);
+        let any = _mm256_or_si256(_mm256_or_si256(e0, e1), _mm256_or_si256(e2, e3));
+        if _mm256_testz_si256(any, any) == 1 {
+            i += 128;
+            continue;
+        }
+
+        let m0 = _mm256_movemask_epi8(e0);
         if m0 != 0 {
             return i + (m0 as u32).trailing_zeros() as usize;
         }
 
-        let v1 = _mm256_loadu_si256(p1 as *const __m256i);
-        let m1 = _mm256_movemask_epi8(_mm256_cmpeq_epi8(v1, zero));
+        let m1 = _mm256_movemask_epi8(e1);
         if m1 != 0 {
             return i + 32 + (m1 as u32).trailing_zeros() as usize;
         }
 
-        let v2 = _mm256_loadu_si256(p2 as *const __m256i);
-        let m2 = _mm256_movemask_epi8(_mm256_cmpeq_epi8(v2, zero));
+        let m2 = _mm256_movemask_epi8(e2);
         if m2 != 0 {
             return i + 64 + (m2 as u32).trailing_zeros() as usize;
         }
 
-        let v3 = _mm256_loadu_si256(p3 as *const __m256i);
-        let m3 = _mm256_movemask_epi8(_mm256_cmpeq_epi8(v3, zero));
+        let m3 = _mm256_movemask_epi8(e3);
         if m3 != 0 {
             return i + 96 + (m3 as u32).trailing_zeros() as usize;
         }
-
-        i += 128;
     }
 
     while i + 32 <= len {
-        let v = _mm256_loadu_si256(ptr.add(i) as *const __m256i);
-        let m = _mm256_movemask_epi8(_mm256_cmpeq_epi8(v, zero));
+        let e = _mm256_cmpeq_epi8(_mm256_loadu_si256(ptr.add(i) as *const __m256i), zero);
+        if _mm256_testz_si256(e, e) == 1 {
+            i += 32;
+            continue;
+        }
+        let m = _mm256_movemask_epi8(e);
         if m != 0 {
             return i + (m as u32).trailing_zeros() as usize;
         }
-        i += 32;
     }
 
     i + strlen_scan_scalar(ptr.add(i), len - i)
@@ -111,14 +119,21 @@ unsafe fn strlen_scan_avx2(ptr: *const u8, len: usize) -> usize {
 
 #[inline(always)]
 unsafe fn strlen_scan(ptr: *const u8, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    if *ptr == 0 {
+        return 0;
+    }
+
     #[cfg(target_arch = "x86_64")]
     {
-        return strlen_scan_avx2(ptr, len);
+        return 1 + strlen_scan_avx2(ptr.add(1), len - 1);
     }
 
     #[cfg(not(target_arch = "x86_64"))]
     {
-        strlen_scan_scalar(ptr, len)
+        1 + strlen_scan_scalar(ptr.add(1), len - 1)
     }
 }
 
@@ -135,7 +150,11 @@ unsafe fn strlen_scan(ptr: *const u8, len: usize) -> usize {
 /// assert_eq!(strlen(b"hello"), 5); // no null terminator
 /// ```
 pub fn strlen(s: &[u8]) -> usize {
-    unsafe { strlen_scan(s.as_ptr(), s.len()) }
+    if s.len() < 32 {
+        return unsafe { strlen_scan(s.as_ptr(), s.len()) };
+    }
+
+    unsafe { optimized_memchr_unified(s.as_ptr(), s.len(), 0).unwrap_or(s.len()) }
 }
 
 /// Calculate bounded length of a null-terminated string
@@ -150,7 +169,11 @@ pub fn strlen(s: &[u8]) -> usize {
 /// ```
 pub fn strnlen(s: &[u8], maxlen: usize) -> usize {
     let limit = s.len().min(maxlen);
-    unsafe { strlen_scan(s.as_ptr(), limit) }
+    if limit < 32 {
+        return unsafe { strlen_scan(s.as_ptr(), limit) };
+    }
+
+    unsafe { optimized_memchr_unified(s.as_ptr(), limit, 0).unwrap_or(limit) }
 }
 
 /// Version-aware string comparison (musl-compatible).

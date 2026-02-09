@@ -19,6 +19,13 @@ pub unsafe fn optimized_memcmp_unified(s1: *const u8, s2: *const u8, n: usize) -
         return unsafe { optimized_memcmp_scalar_wide(s1, s2, n) };
     }
 
+    if n <= 64 {
+        #[cfg(target_arch = "x86_64")]
+        {
+            return unsafe { optimized_memcmp_32_to_64(s1, s2, n) };
+        }
+    }
+
     #[cfg(target_arch = "x86_64")]
     {
         return unsafe { optimized_memcmp_avx2(s1, s2, n) };
@@ -71,6 +78,34 @@ unsafe fn first_diff_32(s1: *const u8, s2: *const u8) -> usize {
     (!mask).trailing_zeros() as usize
 }
 
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn optimized_memcmp_32_to_64(s1: *const u8, s2: *const u8, n: usize) -> i32 {
+    let a0 = _mm256_loadu_si256(s1 as *const __m256i);
+    let b0 = _mm256_loadu_si256(s2 as *const __m256i);
+    let x0 = _mm256_xor_si256(a0, b0);
+    if _mm256_testz_si256(x0, x0) == 0 {
+        let d = first_diff_32(s1, s2);
+        return (*s1.add(d) as i32) - (*s2.add(d) as i32);
+    }
+
+    if n == 32 {
+        return 0;
+    }
+
+    let base = n - 32;
+    let a1 = _mm256_loadu_si256(s1.add(base) as *const __m256i);
+    let b1 = _mm256_loadu_si256(s2.add(base) as *const __m256i);
+    let x1 = _mm256_xor_si256(a1, b1);
+    if _mm256_testz_si256(x1, x1) == 0 {
+        let d = first_diff_32(s1.add(base), s2.add(base));
+        let idx = base + d;
+        return (*s1.add(idx) as i32) - (*s2.add(idx) as i32);
+    }
+
+    0
+}
+
 #[target_feature(enable = "avx2")]
 unsafe fn optimized_memcmp_avx2(s1: *const u8, s2: *const u8, n: usize) -> i32 {
     let mut i = 0usize;
@@ -88,24 +123,31 @@ unsafe fn optimized_memcmp_avx2(s1: *const u8, s2: *const u8, n: usize) -> i32 {
         let a1 = _mm256_loadu_si256(s1.add(i + 32) as *const __m256i);
         let b1 = _mm256_loadu_si256(s2.add(i + 32) as *const __m256i);
         let x1 = _mm256_xor_si256(a1, b1);
+        let a2 = _mm256_loadu_si256(s1.add(i + 64) as *const __m256i);
+        let b2 = _mm256_loadu_si256(s2.add(i + 64) as *const __m256i);
+        let x2 = _mm256_xor_si256(a2, b2);
+        let a3 = _mm256_loadu_si256(s1.add(i + 96) as *const __m256i);
+        let b3 = _mm256_loadu_si256(s2.add(i + 96) as *const __m256i);
+        let x3 = _mm256_xor_si256(a3, b3);
+
+        let any = _mm256_or_si256(_mm256_or_si256(x1, x2), x3);
+        if _mm256_testz_si256(any, any) == 1 {
+            i += 128;
+            continue;
+        }
+
         if _mm256_testz_si256(x1, x1) == 0 {
             let d = first_diff_32(s1.add(i + 32), s2.add(i + 32));
             let idx = i + 32 + d;
             return (*s1.add(idx) as i32) - (*s2.add(idx) as i32);
         }
 
-        let a2 = _mm256_loadu_si256(s1.add(i + 64) as *const __m256i);
-        let b2 = _mm256_loadu_si256(s2.add(i + 64) as *const __m256i);
-        let x2 = _mm256_xor_si256(a2, b2);
         if _mm256_testz_si256(x2, x2) == 0 {
             let d = first_diff_32(s1.add(i + 64), s2.add(i + 64));
             let idx = i + 64 + d;
             return (*s1.add(idx) as i32) - (*s2.add(idx) as i32);
         }
 
-        let a3 = _mm256_loadu_si256(s1.add(i + 96) as *const __m256i);
-        let b3 = _mm256_loadu_si256(s2.add(i + 96) as *const __m256i);
-        let x3 = _mm256_xor_si256(a3, b3);
         if _mm256_testz_si256(x3, x3) == 0 {
             let d = first_diff_32(s1.add(i + 96), s2.add(i + 96));
             let idx = i + 96 + d;

@@ -31,15 +31,21 @@ pub unsafe fn optimized_memchr_unified(s: *const u8, n: usize, needle: u8) -> Op
     if n == 0 {
         return None;
     }
+    if unsafe { *s } == needle {
+        return Some(0);
+    }
+    if n == 1 {
+        return None;
+    }
 
     #[cfg(target_arch = "x86_64")]
     {
-        return unsafe { optimized_memchr_avx2(s, n, needle) };
+        return unsafe { optimized_memchr_avx2(s.add(1), n - 1, needle).map(|i| i + 1) };
     }
 
     #[cfg(not(target_arch = "x86_64"))]
     {
-        unsafe { optimized_memchr_scalar(s, n, needle) }
+        unsafe { optimized_memchr_scalar(s.add(1), n - 1, needle).map(|i| i + 1) }
     }
 }
 
@@ -55,15 +61,22 @@ pub unsafe fn optimized_memrchr_unified(s: *const u8, n: usize, needle: u8) -> O
     if n == 0 {
         return None;
     }
+    let last = n - 1;
+    if unsafe { *s.add(last) } == needle {
+        return Some(last);
+    }
+    if n == 1 {
+        return None;
+    }
 
     #[cfg(target_arch = "x86_64")]
     {
-        return unsafe { optimized_memrchr_avx2(s, n, needle) };
+        return unsafe { optimized_memrchr_avx2(s, n - 1, needle) };
     }
 
     #[cfg(not(target_arch = "x86_64"))]
     {
-        unsafe { optimized_memrchr_scalar(s, n, needle) }
+        unsafe { optimized_memrchr_scalar(s, n - 1, needle) }
     }
 }
 
@@ -141,7 +154,7 @@ unsafe fn optimized_memrchr_scalar_wide(s: *const u8, n: usize, needle: u8) -> O
 #[target_feature(enable = "avx2")]
 unsafe fn optimized_memchr_avx2(s: *const u8, n: usize, needle: u8) -> Option<usize> {
     if n < 64 {
-        return unsafe { optimized_memchr_scalar_wide(s, n, needle) };
+        return unsafe { optimized_memchr_small_avx2(s, n, needle) };
     }
 
     let needle_v = _mm256_set1_epi8(needle as i8);
@@ -205,9 +218,55 @@ unsafe fn optimized_memchr_avx2(s: *const u8, n: usize, needle: u8) -> Option<us
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
+unsafe fn optimized_memchr_small_avx2(s: *const u8, n: usize, needle: u8) -> Option<usize> {
+    debug_assert!(n > 0 && n < 64);
+
+    if n >= 32 {
+        let needle_v = _mm256_set1_epi8(needle as i8);
+        let v0 = _mm256_loadu_si256(s as *const __m256i);
+        let m0 = _mm256_movemask_epi8(_mm256_cmpeq_epi8(v0, needle_v));
+        if m0 != 0 {
+            return Some(first_set_bit(m0));
+        }
+        if n == 32 {
+            return None;
+        }
+        let off = n - 32;
+        let v1 = _mm256_loadu_si256(s.add(off) as *const __m256i);
+        let m1 = _mm256_movemask_epi8(_mm256_cmpeq_epi8(v1, needle_v));
+        if m1 != 0 {
+            return Some(off + first_set_bit(m1));
+        }
+        return None;
+    }
+
+    if n >= 16 {
+        let needle_v = _mm_set1_epi8(needle as i8);
+        let v0 = _mm_loadu_si128(s as *const __m128i);
+        let m0 = _mm_movemask_epi8(_mm_cmpeq_epi8(v0, needle_v));
+        if m0 != 0 {
+            return Some((m0 as u32).trailing_zeros() as usize);
+        }
+        if n == 16 {
+            return None;
+        }
+        let off = n - 16;
+        let v1 = _mm_loadu_si128(s.add(off) as *const __m128i);
+        let m1 = _mm_movemask_epi8(_mm_cmpeq_epi8(v1, needle_v));
+        if m1 != 0 {
+            return Some(off + (m1 as u32).trailing_zeros() as usize);
+        }
+        return None;
+    }
+
+    optimized_memchr_scalar(s, n, needle)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
 unsafe fn optimized_memrchr_avx2(s: *const u8, n: usize, needle: u8) -> Option<usize> {
     if n < 64 {
-        return unsafe { optimized_memrchr_scalar_wide(s, n, needle) };
+        return unsafe { optimized_memrchr_small_avx2(s, n, needle) };
     }
 
     let needle_v = _mm256_set1_epi8(needle as i8);
@@ -272,6 +331,52 @@ unsafe fn optimized_memrchr_avx2(s: *const u8, n: usize, needle: u8) -> Option<u
     }
 
     unsafe { optimized_memrchr_scalar_wide(s, i, needle) }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn optimized_memrchr_small_avx2(s: *const u8, n: usize, needle: u8) -> Option<usize> {
+    debug_assert!(n > 0 && n < 64);
+
+    if n >= 32 {
+        let needle_v = _mm256_set1_epi8(needle as i8);
+        let off = n - 32;
+        let v1 = _mm256_loadu_si256(s.add(off) as *const __m256i);
+        let m1 = _mm256_movemask_epi8(_mm256_cmpeq_epi8(v1, needle_v));
+        if m1 != 0 {
+            return Some(off + last_set_bit(m1));
+        }
+        if n == 32 {
+            return None;
+        }
+        let v0 = _mm256_loadu_si256(s as *const __m256i);
+        let m0 = _mm256_movemask_epi8(_mm256_cmpeq_epi8(v0, needle_v));
+        if m0 != 0 {
+            return Some(last_set_bit(m0));
+        }
+        return None;
+    }
+
+    if n >= 16 {
+        let needle_v = _mm_set1_epi8(needle as i8);
+        let off = n - 16;
+        let v1 = _mm_loadu_si128(s.add(off) as *const __m128i);
+        let m1 = _mm_movemask_epi8(_mm_cmpeq_epi8(v1, needle_v));
+        if m1 != 0 {
+            return Some(off + (31 - (m1 as u32).leading_zeros()) as usize);
+        }
+        if n == 16 {
+            return None;
+        }
+        let v0 = _mm_loadu_si128(s as *const __m128i);
+        let m0 = _mm_movemask_epi8(_mm_cmpeq_epi8(v0, needle_v));
+        if m0 != 0 {
+            return Some((31 - (m0 as u32).leading_zeros()) as usize);
+        }
+        return None;
+    }
+
+    optimized_memrchr_scalar(s, n, needle)
 }
 
 #[cfg(test)]

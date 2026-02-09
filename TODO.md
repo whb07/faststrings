@@ -32,8 +32,8 @@
 | `stpncpy` | POSIX | yes | no | unknown |  |
 | `strcat` | C/POSIX | yes | no | unknown |  |
 | `strncat` | C/POSIX | yes | no | unknown |  |
-| `strcmp` | C/POSIX | yes | no | unknown |  |
-| `strncmp` | C/POSIX | yes | no | unknown |  |
+| `strcmp` | C/POSIX | yes | partial | no | New dedicated benchmark run is 0/30 wins; equal/diff and shorter-string cases are consistently ~3-40x slower than glibc |
+| `strncmp` | C/POSIX | yes | partial | no | New dedicated benchmark run is 0/30 wins; small `n` and long-scan bounded cases remain consistently far behind glibc |
 | `strcoll` | C/POSIX | yes | no | unknown | locale-sensitive in libc |
 | `strcasecmp` | POSIX | yes | no | unknown |  |
 | `strncasecmp` | POSIX | yes | no | unknown |  |

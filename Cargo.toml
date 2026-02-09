@@ -35,3 +35,7 @@ harness = false
 [[bench]]
 name = "bcopy"
 harness = false
+
+[[bench]]
+name = "bsd_mem"
+harness = false

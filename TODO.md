@@ -18,9 +18,9 @@
 | `memrchr` | GNU/POSIX ext | yes | partial | no | AVX2 reverse-scan path + criterion harness landed; focused run is 8/54 wins, with large miss-path regressions (especially 31/63B and 4KiB scans) |
 | `memccpy` | C/POSIX | yes | no | unknown |  |
 | `memmem` | GNU ext | yes | no | unknown |  |
-| `explicit_bzero` | BSD/GNU ext | yes | no | unknown |  |
-| `bzero` | BSD legacy | yes | no | unknown |  |
-| `bcmp` | BSD legacy | yes | no | unknown |  |
+| `explicit_bzero` | BSD/GNU ext | yes | partial | no | New dedicated bench run is 16/21 wins; strong gains at 31-256B, but slight regressions remain around 4KiB alignment corners |
+| `bzero` | BSD legacy | yes | partial | no | New dedicated bench run is 18/21 wins; fast on 31-1024B and 64KiB, but 4KiB aligned cases are still a little slower |
+| `bcmp` | BSD legacy | yes | partial | no | New dedicated bench run is 1/28 wins; current memcmp-backed path regresses heavily on 63-256B equal/diff-last cases |
 | `bcopy` | BSD legacy | yes | partial | no | Delegating to current optimized memmove path yields 16/30 wins in focused overlap/non-overlap runs; backward-overlap at 1KiB/64KiB regresses heavily (~2.2-2.5x) |
 | `ffs` | POSIX | yes | yes | no | Dedicated value-pattern benchmark completed; current run is 21/44 wins with sub-1.1% deltas, so this is near parity rather than a consistent glibc win |
 | `strlen` | C/POSIX | yes | no | unknown |  |

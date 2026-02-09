@@ -12,6 +12,8 @@ pub mod search;
 pub mod simd;
 pub mod stpncpy;
 pub mod str;
+pub mod strerror;
+pub mod strerror_r;
 pub mod strdup;
 pub mod strndup;
 pub mod strtok;

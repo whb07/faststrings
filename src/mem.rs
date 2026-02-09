@@ -75,10 +75,9 @@ pub fn memset(dest: &mut [u8], c: u8) -> usize {
 pub fn memcmp(s1: &[u8], s2: &[u8]) -> i32 {
     let n = s1.len().min(s2.len());
 
-    for i in 0..n {
-        if s1[i] != s2[i] {
-            return (s1[i] as i32) - (s2[i] as i32);
-        }
+    let cmp = unsafe { crate::memcmp::optimized_memcmp_unified(s1.as_ptr(), s2.as_ptr(), n) };
+    if cmp != 0 {
+        return cmp;
     }
 
     // If all bytes equal, compare by length
@@ -95,14 +94,7 @@ pub fn memcmp(s1: &[u8], s2: &[u8]) -> i32 {
 /// If either slice is shorter than `n`, comparison stops at the shorter length.
 pub fn memcmp_n(s1: &[u8], s2: &[u8], n: usize) -> i32 {
     let len = s1.len().min(s2.len()).min(n);
-
-    for i in 0..len {
-        if s1[i] != s2[i] {
-            return (s1[i] as i32) - (s2[i] as i32);
-        }
-    }
-
-    0
+    unsafe { crate::memcmp::optimized_memcmp_unified(s1.as_ptr(), s2.as_ptr(), len) }
 }
 
 /// Scan a byte slice for a character

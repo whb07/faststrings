@@ -3,6 +3,7 @@
 pub mod bcopy;
 pub mod ffs;
 pub mod mem;
+pub mod memcmp;
 pub mod memcpy;
 pub mod memmove;
 pub mod memset;

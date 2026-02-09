@@ -19,3 +19,7 @@ harness = false
 [[bench]]
 name = "memmove"
 harness = false
+
+[[bench]]
+name = "memcmp"
+harness = false

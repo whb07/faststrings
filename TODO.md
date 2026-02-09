@@ -85,10 +85,10 @@
 | `wcstok` | C/POSIX | yes | no | unknown |  |
 | `wcsxfrm` | C/POSIX | yes | no | unknown | locale-sensitive in libc |
 | `wcsdup` | POSIX | yes | no | unknown |  |
-| `wmemcpy` | C/POSIX | yes | no | unknown |  |
-| `wmempcpy` | GNU ext | yes | no | unknown |  |
-| `wmemmove` | C/POSIX | yes | no | unknown |  |
-| `wmemset` | C/POSIX | yes | no | unknown |  |
-| `wmemcmp` | C/POSIX | yes | no | unknown |  |
-| `wmemchr` | C/POSIX | yes | no | unknown |  |
-| `wmemrchr` | GNU ext | yes | no | unknown |  |
+| `wmemcpy` | C/POSIX | yes | partial | no | Dedicated benchmark run is 1/3 wins; near-parity at medium size but slower on small and large copies |
+| `wmempcpy` | GNU ext | yes | partial | no | Dedicated benchmark run is 0/3 wins; current path trails glibc across tested sizes |
+| `wmemmove` | C/POSIX | yes | partial | no | Dedicated benchmark run is 1/3 wins (small size), with medium/large non-overlap paths still slower |
+| `wmemset` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/3 wins; near parity, but still consistently behind glibc |
+| `wmemcmp` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/3 wins on equal buffers; current implementation is much slower than glibc |
+| `wmemchr` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/3 wins; hit-mid scans are significantly slower than glibc |
+| `wmemrchr` | GNU ext | yes | partial | unknown | Dedicated benchmark compares against a scalar reverse-scan baseline (glibc lacks `wmemrchr`); current path is slower in all tested sizes |

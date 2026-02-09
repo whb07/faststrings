@@ -75,3 +75,7 @@ harness = false
 [[bench]]
 name = "strstate"
 harness = false
+
+[[bench]]
+name = "wmem_bench"
+harness = false

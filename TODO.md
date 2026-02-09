@@ -33,7 +33,7 @@ High-ROI execution checklist:
 
 Latest high-ROI snapshot (criterion `new/estimates.json` as of this pass):
 - `memcpy`: wins 49 / 62
-- `memset`: wins 54 / 68
+- `memset`: wins 55 / 68
 - `memmove`: wins 53 / 93
 - `memcmp`: wins 26 / 104
 - `memchr`: wins 13 / 116
@@ -45,7 +45,7 @@ Latest high-ROI snapshot (criterion `new/estimates.json` as of this pass):
 |---|---|---:|---:|---:|---|
 | `memcpy` | C/POSIX | yes | yes | no | AVX2 tuned with 63/64-byte cliff handling; latest full run wins 49/62 with remaining losses centered on 95-1024B cliffs and 8MiB +/- 1 |
 | `memmove` | C/POSIX | yes | partial | no | Backward overlap path now uses 256B AVX2 descending chunks plus end-alignment, raising the current snapshot to 53/93 wins; still partial with persistent forward 511/512 cliffs and remaining overlap losses |
-| `memset` | C/POSIX | yes | yes | no | AVX2/NT tuned with 480-512-byte fast path; latest full run wins 54/68, with remaining misses around 64B misalignment, 256B alignment corners, and 1MiB |
+| `memset` | C/POSIX | yes | yes | no | AVX2/NT tuned with 480-512-byte fast path; latest full run wins 55/68, with remaining misses concentrated in 64B misalignment and a few 256B/large-value corners |
 | `memcmp` | C/POSIX | yes | partial | no | AVX2 now covers >=32B plus a dedicated 32-64B fast path; latest snapshot is 26/104 wins, but equal/diff-last and alignment-heavy cases remain behind glibc |
 | `memchr` | C/POSIX | yes | partial | no | New small-size AVX2/SSE kernels and first-byte fast path improved 31/63 miss and hit-first cases, but overall snapshot remains 13/116 wins with large miss/tail patterns still lagging |
 | `memrchr` | GNU/POSIX ext | yes | partial | no | AVX2 reverse-scan path + criterion harness landed; focused run is 8/54 wins, with large miss-path regressions (especially 31/63B and 4KiB scans) |

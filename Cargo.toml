@@ -67,3 +67,7 @@ harness = false
 [[bench]]
 name = "strcompare_ext"
 harness = false
+
+[[bench]]
+name = "strcopy"
+harness = false

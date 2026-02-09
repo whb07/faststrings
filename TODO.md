@@ -26,19 +26,19 @@
 | `strlen` | C/POSIX | yes | partial | no | memchr-backed path benchmarked at 0/21 wins in current C-string cases; biggest losses are mid/tail scans at 1KiB-64KiB |
 | `strnlen` | POSIX | yes | partial | no | memchr-backed path benchmarked at 0/28 wins; especially weak when scanning long bounded ranges and `maxlen`-before-terminator scenarios |
 | `strverscmp` | GNU ext | yes | partial | no | Dedicated benchmark run is 2/10 wins; only a couple long-string cases edge out glibc while most numeric/version-ordering cases regress |
-| `strcpy` | C/POSIX | yes | no | unknown |  |
-| `strncpy` | C/POSIX | yes | no | unknown |  |
-| `stpcpy` | POSIX/GNU ext | yes | no | unknown |  |
-| `stpncpy` | POSIX | yes | no | unknown |  |
-| `strcat` | C/POSIX | yes | no | unknown |  |
-| `strncat` | C/POSIX | yes | no | unknown |  |
+| `strcpy` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/3 wins; copy path remains ~1.4-2.3x slower than glibc across tested sizes |
+| `strncpy` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/6 wins; both truncation and pad cases lag glibc (worst around small pad paths) |
+| `stpcpy` | POSIX/GNU ext | yes | partial | no | Dedicated benchmark run is 0/3 wins; consistently behind glibc from 31B through 4KiB |
+| `stpncpy` | POSIX | yes | partial | no | Dedicated benchmark run is 0/6 wins; truncation and pad workloads are slower than glibc in all measured cases |
+| `strcat` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/3 wins; append path is ~1.2-1.5x slower in current cases |
+| `strncat` | C/POSIX | yes | partial | no | Dedicated benchmark run is 1/6 wins; near-parity at 256B `n_full`, but other n/size combinations still regress |
 | `strcmp` | C/POSIX | yes | partial | no | New dedicated benchmark run is 0/30 wins; equal/diff and shorter-string cases are consistently ~3-40x slower than glibc |
 | `strncmp` | C/POSIX | yes | partial | no | New dedicated benchmark run is 0/30 wins; small `n` and long-scan bounded cases remain consistently far behind glibc |
 | `strcoll` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/18 wins in C-locale style cases; current path is consistently slower than glibc collation |
 | `strcasecmp` | POSIX | yes | partial | no | Dedicated benchmark run is 0/18 wins; equal/diff/shorter-string cases are broadly slower, especially at larger sizes |
 | `strncasecmp` | POSIX | yes | partial | no | Dedicated benchmark run is 0/18 wins; bounded and shorter-string scenarios all regress against glibc |
-| `strlcpy` | BSD ext | yes | no | unknown |  |
-| `strlcat` | BSD ext | yes | no | unknown |  |
+| `strlcpy` | BSD ext | yes | partial | no | Dedicated benchmark run is 1/6 wins; near-parity on 256B fit, but truncate and large cases still slower overall |
+| `strlcat` | BSD ext | yes | partial | no | Dedicated benchmark run is 0/6 wins; mostly near-parity but still consistently behind glibc |
 | `strchr` | C/POSIX | yes | partial | no | memchr-backed path benchmarked at 0/30 wins; especially severe regressions on early-hit cases (e.g. 64KiB hit-head) and mid/miss scans |
 | `strchrnul` | GNU ext | yes | partial | no | memchr-backed path benchmarked at 0/30 wins; large losses on hit-head and small miss/find-nul scenarios |
 | `strrchr` | C/POSIX | yes | partial | no | memrchr-backed path benchmarked at 0/30 wins; misses and head/mid hit patterns remain significantly behind glibc |
@@ -51,7 +51,7 @@
 | `rindex` | BSD legacy | yes | partial | no | Alias of `strrchr`; inherits current `strrchr` benchmark profile (0/30 wins) |
 | `strtok` | C/POSIX | yes | no | unknown | safe state-based API |
 | `strtok_r` | POSIX | yes | no | unknown |  |
-| `strxfrm` | C/POSIX | yes | no | unknown | locale-sensitive in libc |
+| `strxfrm` | C/POSIX | yes | partial | no | Dedicated benchmark run is 4/6 wins in C-locale copy-like cases, but 4KiB paths still regress so this is not a consistent overall win |
 | `strdup` | POSIX | yes | no | unknown |  |
 | `strndup` | POSIX | yes | no | unknown |  |
 | `strerror` | C/POSIX | no | no | unknown | deferred for now |

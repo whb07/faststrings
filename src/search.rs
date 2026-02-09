@@ -26,7 +26,7 @@ pub fn strchr(s: &[u8], c: u8) -> Option<usize> {
     };
 
     let search_len = len.min(s.len());
-    s[..search_len].iter().position(|&b| b == c)
+    crate::mem::memchr(&s[..search_len], c)
 }
 
 /// Locate character in string (returns length if not found)
@@ -37,7 +37,7 @@ pub fn strchrnul(s: &[u8], c: u8) -> usize {
     let len = strlen(s);
     let search_len = len.min(s.len());
 
-    s[..search_len].iter().position(|&b| b == c).unwrap_or(len)
+    crate::mem::memchr(&s[..search_len], c).unwrap_or(len)
 }
 
 /// Locate character in string (from end)
@@ -55,7 +55,7 @@ pub fn strrchr(s: &[u8], c: u8) -> Option<usize> {
     let len = strlen(s);
     let search_len = if c == 0 { len + 1 } else { len }.min(s.len());
 
-    s[..search_len].iter().rposition(|&b| b == c)
+    crate::mem::memrchr(&s[..search_len], c)
 }
 
 /// Locate substring

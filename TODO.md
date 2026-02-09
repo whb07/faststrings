@@ -39,16 +39,16 @@
 | `strncasecmp` | POSIX | yes | no | unknown |  |
 | `strlcpy` | BSD ext | yes | no | unknown |  |
 | `strlcat` | BSD ext | yes | no | unknown |  |
-| `strchr` | C/POSIX | yes | no | unknown |  |
-| `strchrnul` | GNU ext | yes | no | unknown |  |
-| `strrchr` | C/POSIX | yes | no | unknown |  |
+| `strchr` | C/POSIX | yes | partial | no | memchr-backed path benchmarked at 0/30 wins; especially severe regressions on early-hit cases (e.g. 64KiB hit-head) and mid/miss scans |
+| `strchrnul` | GNU ext | yes | partial | no | memchr-backed path benchmarked at 0/30 wins; large losses on hit-head and small miss/find-nul scenarios |
+| `strrchr` | C/POSIX | yes | partial | no | memrchr-backed path benchmarked at 0/30 wins; misses and head/mid hit patterns remain significantly behind glibc |
 | `strstr` | C/POSIX | yes | no | unknown |  |
 | `strcasestr` | GNU ext | yes | no | unknown |  |
 | `strspn` | C/POSIX | yes | no | unknown |  |
 | `strcspn` | C/POSIX | yes | no | unknown |  |
 | `strpbrk` | C/POSIX | yes | no | unknown |  |
-| `index` | BSD legacy | yes | no | unknown | alias-style API |
-| `rindex` | BSD legacy | yes | no | unknown | alias-style API |
+| `index` | BSD legacy | yes | partial | no | Alias of `strchr`; inherits current `strchr` benchmark profile (0/30 wins) |
+| `rindex` | BSD legacy | yes | partial | no | Alias of `strrchr`; inherits current `strrchr` benchmark profile (0/30 wins) |
 | `strtok` | C/POSIX | yes | no | unknown | safe state-based API |
 | `strtok_r` | POSIX | yes | no | unknown |  |
 | `strxfrm` | C/POSIX | yes | no | unknown | locale-sensitive in libc |

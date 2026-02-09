@@ -3,6 +3,7 @@
 /// Find first (least significant) set bit in `i`.
 ///
 /// Returns 1-based position of the bit, or 0 when `i == 0`.
+#[inline(always)]
 pub fn ffs(i: i32) -> i32 {
     if i == 0 {
         0

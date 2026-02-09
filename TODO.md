@@ -22,7 +22,7 @@
 | `bzero` | BSD legacy | yes | no | unknown |  |
 | `bcmp` | BSD legacy | yes | no | unknown |  |
 | `bcopy` | BSD legacy | yes | no | unknown |  |
-| `ffs` | POSIX | yes | no | unknown |  |
+| `ffs` | POSIX | yes | yes | no | Dedicated value-pattern benchmark completed; current run is 21/44 wins with sub-1.1% deltas, so this is near parity rather than a consistent glibc win |
 | `strlen` | C/POSIX | yes | no | unknown |  |
 | `strnlen` | POSIX | yes | no | unknown |  |
 | `strverscmp` | GNU ext | yes | no | unknown |  |

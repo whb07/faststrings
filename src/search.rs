@@ -4,6 +4,35 @@
 
 use crate::str::strlen;
 
+#[inline(always)]
+fn build_byte_bitmap(set: &[u8]) -> [u64; 4] {
+    let mut bitmap = [0u64; 4];
+    for &byte in set {
+        let slot = (byte >> 6) as usize;
+        let bit = 1u64 << (byte & 63);
+        bitmap[slot] |= bit;
+    }
+    bitmap
+}
+
+#[inline(always)]
+fn bitmap_contains(bitmap: &[u64; 4], byte: u8) -> bool {
+    let slot = (byte >> 6) as usize;
+    let bit = 1u64 << (byte & 63);
+    (bitmap[slot] & bit) != 0
+}
+
+#[inline(always)]
+fn contains_small_set(set: &[u8], c: u8) -> bool {
+    match set {
+        [a] => c == *a,
+        [a, b] => c == *a || c == *b,
+        [a, b, d] => c == *a || c == *b || c == *d,
+        [a, b, d, e] => c == *a || c == *b || c == *d || c == *e,
+        _ => false,
+    }
+}
+
 /// Locate character in null-terminated string
 ///
 /// Returns the index of the first occurrence of `c` in `s` (up to the null terminator),
@@ -141,8 +170,22 @@ pub fn strspn(s: &[u8], accept: &[u8]) -> usize {
     let s = &s[..s_len.min(s.len())];
     let accept = &accept[..accept_len.min(accept.len())];
 
+    if accept.is_empty() {
+        return 0;
+    }
+
+    if accept.len() <= 4 {
+        for (i, &c) in s.iter().enumerate() {
+            if !contains_small_set(accept, c) {
+                return i;
+            }
+        }
+        return s.len();
+    }
+
+    let bitmap = build_byte_bitmap(accept);
     for (i, &c) in s.iter().enumerate() {
-        if !accept.contains(&c) {
+        if !bitmap_contains(&bitmap, c) {
             return i;
         }
     }
@@ -167,8 +210,26 @@ pub fn strcspn(s: &[u8], reject: &[u8]) -> usize {
     let s = &s[..s_len.min(s.len())];
     let reject = &reject[..reject_len.min(reject.len())];
 
+    if reject.is_empty() {
+        return s.len();
+    }
+
+    if reject.len() == 1 {
+        return crate::mem::memchr(s, reject[0]).unwrap_or(s.len());
+    }
+
+    if reject.len() <= 4 {
+        for (i, &c) in s.iter().enumerate() {
+            if contains_small_set(reject, c) {
+                return i;
+            }
+        }
+        return s.len();
+    }
+
+    let bitmap = build_byte_bitmap(reject);
     for (i, &c) in s.iter().enumerate() {
-        if reject.contains(&c) {
+        if bitmap_contains(&bitmap, c) {
             return i;
         }
     }
@@ -193,8 +254,26 @@ pub fn strpbrk(s: &[u8], accept: &[u8]) -> Option<usize> {
     let s = &s[..s_len.min(s.len())];
     let accept = &accept[..accept_len.min(accept.len())];
 
+    if accept.is_empty() {
+        return None;
+    }
+
+    if accept.len() == 1 {
+        return crate::mem::memchr(s, accept[0]);
+    }
+
+    if accept.len() <= 4 {
+        for (i, &c) in s.iter().enumerate() {
+            if contains_small_set(accept, c) {
+                return Some(i);
+            }
+        }
+        return None;
+    }
+
+    let bitmap = build_byte_bitmap(accept);
     for (i, &c) in s.iter().enumerate() {
-        if accept.contains(&c) {
+        if bitmap_contains(&bitmap, c) {
             return Some(i);
         }
     }

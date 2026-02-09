@@ -23,3 +23,7 @@ harness = false
 [[bench]]
 name = "memcmp"
 harness = false
+
+[[bench]]
+name = "memchr"
+harness = false

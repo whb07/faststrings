@@ -14,8 +14,8 @@
 | `memmove` | C/POSIX | yes | partial | no | AVX2 overlap path now uses 1MiB `rep movsb` thresholds; focused 1024B/256KiB subset improved to wins 7/14, but backward-overlap cases still lag badly |
 | `memset` | C/POSIX | yes | yes | no | AVX2/NT tuned with 480-512-byte fast path; latest full run wins 54/68, with remaining misses around 64B misalignment, 256B alignment corners, and 1MiB |
 | `memcmp` | C/POSIX | yes | partial | no | AVX2 draft + focused benchmark harness are in place; latest captured run is 13/78 wins, with major regressions on 31-256B equal/diff-last paths |
-| `memchr` | C/POSIX | yes | no | unknown |  |
-| `memrchr` | GNU/POSIX ext | yes | no | unknown |  |
+| `memchr` | C/POSIX | yes | partial | no | AVX2 scan path + criterion harness landed; focused run is 22/54 wins, with regressions concentrated at 31/63B misses and 4KiB full-scan cases |
+| `memrchr` | GNU/POSIX ext | yes | partial | no | AVX2 reverse-scan path + criterion harness landed; focused run is 8/54 wins, with large miss-path regressions (especially 31/63B and 4KiB scans) |
 | `memccpy` | C/POSIX | yes | no | unknown |  |
 | `memmem` | GNU ext | yes | no | unknown |  |
 | `explicit_bzero` | BSD/GNU ext | yes | no | unknown |  |

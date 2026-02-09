@@ -108,7 +108,7 @@ pub fn memcmp_n(s1: &[u8], s2: &[u8], n: usize) -> i32 {
 /// assert_eq!(memchr(b"hello", b'x'), None);
 /// ```
 pub fn memchr(s: &[u8], c: u8) -> Option<usize> {
-    s.iter().position(|&b| b == c)
+    unsafe { crate::memchr::optimized_memchr_unified(s.as_ptr(), s.len(), c) }
 }
 
 /// Scan a byte slice backward for a character
@@ -122,7 +122,7 @@ pub fn memchr(s: &[u8], c: u8) -> Option<usize> {
 /// assert_eq!(memrchr(b"hello", b'x'), None);
 /// ```
 pub fn memrchr(s: &[u8], c: u8) -> Option<usize> {
-    s.iter().rposition(|&b| b == c)
+    unsafe { crate::memchr::optimized_memrchr_unified(s.as_ptr(), s.len(), c) }
 }
 
 /// Copy bytes until a character is found

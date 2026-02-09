@@ -25,7 +25,7 @@
 | `ffs` | POSIX | yes | yes | no | Dedicated value-pattern benchmark completed; current run is 21/44 wins with sub-1.1% deltas, so this is near parity rather than a consistent glibc win |
 | `strlen` | C/POSIX | yes | partial | no | memchr-backed path benchmarked at 0/21 wins in current C-string cases; biggest losses are mid/tail scans at 1KiB-64KiB |
 | `strnlen` | POSIX | yes | partial | no | memchr-backed path benchmarked at 0/28 wins; especially weak when scanning long bounded ranges and `maxlen`-before-terminator scenarios |
-| `strverscmp` | GNU ext | yes | no | unknown |  |
+| `strverscmp` | GNU ext | yes | partial | no | Dedicated benchmark run is 2/10 wins; only a couple long-string cases edge out glibc while most numeric/version-ordering cases regress |
 | `strcpy` | C/POSIX | yes | no | unknown |  |
 | `strncpy` | C/POSIX | yes | no | unknown |  |
 | `stpcpy` | POSIX/GNU ext | yes | no | unknown |  |
@@ -34,9 +34,9 @@
 | `strncat` | C/POSIX | yes | no | unknown |  |
 | `strcmp` | C/POSIX | yes | partial | no | New dedicated benchmark run is 0/30 wins; equal/diff and shorter-string cases are consistently ~3-40x slower than glibc |
 | `strncmp` | C/POSIX | yes | partial | no | New dedicated benchmark run is 0/30 wins; small `n` and long-scan bounded cases remain consistently far behind glibc |
-| `strcoll` | C/POSIX | yes | no | unknown | locale-sensitive in libc |
-| `strcasecmp` | POSIX | yes | no | unknown |  |
-| `strncasecmp` | POSIX | yes | no | unknown |  |
+| `strcoll` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/18 wins in C-locale style cases; current path is consistently slower than glibc collation |
+| `strcasecmp` | POSIX | yes | partial | no | Dedicated benchmark run is 0/18 wins; equal/diff/shorter-string cases are broadly slower, especially at larger sizes |
+| `strncasecmp` | POSIX | yes | partial | no | Dedicated benchmark run is 0/18 wins; bounded and shorter-string scenarios all regress against glibc |
 | `strlcpy` | BSD ext | yes | no | unknown |  |
 | `strlcat` | BSD ext | yes | no | unknown |  |
 | `strchr` | C/POSIX | yes | partial | no | memchr-backed path benchmarked at 0/30 wins; especially severe regressions on early-hit cases (e.g. 64KiB hit-head) and mid/miss scans |

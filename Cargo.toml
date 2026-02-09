@@ -79,3 +79,7 @@ harness = false
 [[bench]]
 name = "wmem_bench"
 harness = false
+
+[[bench]]
+name = "wide_str"
+harness = false

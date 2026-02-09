@@ -60,31 +60,31 @@
 ## Wide String and Wide Memory APIs
 | Function | Standard/Origin | Implemented | Benchmarked | Faster than glibc | Notes |
 |---|---|---:|---:|---:|---|
-| `wcslen` | C/POSIX | yes | no | unknown |  |
-| `wcsnlen` | POSIX | yes | no | unknown |  |
-| `wcscpy` | C/POSIX | yes | no | unknown |  |
-| `wcsncpy` | C/POSIX | yes | no | unknown |  |
-| `wcpcpy` | GNU ext | yes | no | unknown |  |
-| `wcpncpy` | GNU ext | yes | no | unknown |  |
-| `wcscat` | C/POSIX | yes | no | unknown |  |
-| `wcsncat` | C/POSIX | yes | no | unknown |  |
-| `wcscmp` | C/POSIX | yes | no | unknown |  |
-| `wcsncmp` | C/POSIX | yes | no | unknown |  |
-| `wcscoll` | C/POSIX | yes | no | unknown | locale-sensitive in libc |
-| `wcschr` | C/POSIX | yes | no | unknown |  |
-| `wcsrchr` | C/POSIX | yes | no | unknown |  |
-| `wcsstr` | C/POSIX | yes | no | unknown |  |
-| `wcsspn` | C/POSIX | yes | no | unknown |  |
-| `wcscspn` | C/POSIX | yes | no | unknown |  |
-| `wcspbrk` | C/POSIX | yes | no | unknown |  |
-| `wcscasecmp` | POSIX | yes | no | unknown |  |
-| `wcsncasecmp` | POSIX | yes | no | unknown |  |
-| `wcschrnul` | GNU ext | yes | no | unknown |  |
-| `wcslcpy` | BSD ext | yes | no | unknown |  |
-| `wcslcat` | BSD ext | yes | no | unknown |  |
-| `wcstok` | C/POSIX | yes | no | unknown |  |
-| `wcsxfrm` | C/POSIX | yes | no | unknown | locale-sensitive in libc |
-| `wcsdup` | POSIX | yes | no | unknown |  |
+| `wcslen` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins; current scan path is slower than glibc across tested sizes |
+| `wcsnlen` | POSIX | yes | partial | no | Focused benchmark run is 0/3 wins (`maxlen = len/2`), with consistent regressions versus glibc |
+| `wcscpy` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins; copy throughput is behind glibc at small/medium/large sizes |
+| `wcsncpy` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins for `n = len/2`; truncating copy remains slower than glibc |
+| `wcpcpy` | GNU ext | yes | partial | no | Focused benchmark run is 0/3 wins; return-end copy path trails glibc in all measured sizes |
+| `wcpncpy` | GNU ext | yes | partial | no | Focused benchmark run is 0/3 wins for `n = len/2`; current path is significantly slower at larger sizes |
+| `wcscat` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins; append path regresses versus glibc across tested sizes |
+| `wcsncat` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins (`n = src/2`); bounded append is slower than glibc |
+| `wcscmp` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins on diff-mid cases; comparison throughput is well below glibc |
+| `wcsncmp` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins (`n = len/2`, diff-first); bounded compare path regresses heavily |
+| `wcscoll` | C/POSIX | yes | partial | no | Focused C-locale-style diff-mid run is 0/3 wins; still slower than glibc collation |
+| `wcschr` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins (hit-mid); search path lags glibc substantially |
+| `wcsrchr` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins (hit-tail); reverse search remains slower than glibc |
+| `wcsstr` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins (hit-mid); substring search is far behind glibc |
+| `wcsspn` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins on full-prefix cases; set-scan implementation is slower |
+| `wcscspn` | C/POSIX | yes | partial | no | Focused benchmark run is 3/3 wins on hit-mid reject cases, but coverage is narrow and not yet performance-complete |
+| `wcspbrk` | C/POSIX | yes | partial | no | Focused benchmark run is 3/3 wins on hit-mid accept cases, but broader scenario coverage is still missing |
+| `wcscasecmp` | POSIX | yes | partial | no | Focused benchmark run is 3/3 wins on equal case-folded inputs, but this is a narrow workload slice |
+| `wcsncasecmp` | POSIX | yes | partial | no | Focused benchmark run is 3/3 wins (`n = len/2`, equal case-folded), pending broader validation |
+| `wcschrnul` | GNU ext | yes | partial | no | Focused benchmark run is 0/3 wins on miss-paths; current implementation is slower across sizes |
+| `wcslcpy` | BSD ext | yes | partial | no | Focused benchmark run is 0/3 wins (fit capacity); current copy-limit path trails glibc |
+| `wcslcat` | BSD ext | yes | partial | no | Focused benchmark run is 0/3 wins (fit capacity); append-limit path remains slower |
+| `wcstok` | C/POSIX | yes | partial | no | Focused benchmark run is 0/3 wins; large tokenization workloads are much slower than glibc |
+| `wcsxfrm` | C/POSIX | yes | partial | no | Focused C-locale copy-like run is 0/3 wins; current transform path lags glibc |
+| `wcsdup` | POSIX | yes | partial | no | Focused benchmark run is 0/3 wins; duplicate path is slower than glibc across tested sizes |
 | `wmemcpy` | C/POSIX | yes | partial | no | Dedicated benchmark run is 1/3 wins; near-parity at medium size but slower on small and large copies |
 | `wmempcpy` | GNU ext | yes | partial | no | Dedicated benchmark run is 0/3 wins; current path trails glibc across tested sizes |
 | `wmemmove` | C/POSIX | yes | partial | no | Dedicated benchmark run is 1/3 wins (small size), with medium/large non-overlap paths still slower |

@@ -15,7 +15,7 @@ use core::arch::x86_64::*;
 /// - `s1` and `s2` must be valid for reads of `n` bytes.
 #[inline(always)]
 pub unsafe fn optimized_memcmp_unified(s1: *const u8, s2: *const u8, n: usize) -> i32 {
-    if n <= 256 {
+    if n <= 31 {
         return unsafe { optimized_memcmp_scalar_wide(s1, s2, n) };
     }
 

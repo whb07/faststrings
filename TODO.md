@@ -7,6 +7,30 @@
 - `Benchmarked`: `no` / `partial` / `yes`
 - `Faster than glibc`: `no` / `unknown` / `yes`
 
+## High-ROI Completion Plan
+The following APIs are the highest-return items because they sit directly under most
+other libc-style string/memory routines and dominate total byte traffic in real
+workloads. Do not mark this plan complete until every row below has all checks done.
+
+| Function | Priority | Required benchmark coverage | Completion gate |
+|---|---:|---|---|
+| `memcpy` | P0 | size sweep + alignment cliffs + large-buffer thresholds | `yes` only if wins are consistent across small/medium/large and no major cliff regressions remain |
+| `memset` | P0 | size sweep + alignment cliffs + value patterns + large-buffer thresholds | `yes` only if wins are consistent across zero/non-zero values and no major cliff regressions remain |
+| `memmove` | P0 | non-overlap + overlap-forward + overlap-backward across size cliffs | `yes` only if overlap-backward regressions are closed and non-overlap remains competitive |
+| `memcmp` | P0 | equal + diff-first/mid/last + alignment cliffs | `yes` only if small/medium/large comparisons consistently beat glibc |
+| `memchr` | P0 | miss/hit-first/mid/last + alignment cliffs + large scans | `yes` only if miss-heavy and large-scan cases are consistently faster |
+| `strlen` | P0 | NUL at head/mid/tail across size cliffs | `yes` only if head/mid/tail patterns are consistently faster |
+| `strnlen` | P0 | maxlen-before-NUL/at-NUL/after-NUL + mid-NUL bounded scans | `yes` only if bounded long-scan cases are consistently faster |
+
+High-ROI execution checklist:
+- [ ] `memcpy` tuned + benchmark evidence updated
+- [ ] `memset` tuned + benchmark evidence updated
+- [ ] `memmove` tuned + benchmark evidence updated
+- [ ] `memcmp` tuned + benchmark evidence updated
+- [ ] `memchr` tuned + benchmark evidence updated
+- [ ] `strlen` tuned + benchmark evidence updated
+- [ ] `strnlen` tuned + benchmark evidence updated
+
 ## Narrow String and Memory APIs
 | Function | Standard/Origin | Implemented | Benchmarked | Faster than glibc | Notes |
 |---|---|---:|---:|---:|---|

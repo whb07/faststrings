@@ -195,6 +195,16 @@ unsafe fn memmove_forward_avx2(dest: *mut u8, src: *const u8, n: usize) {
 unsafe fn memmove_backward_avx2(dest: *mut u8, src: *const u8, n: usize) {
     let mut rem = n;
 
+    // Align the end pointer so the main backward loop can use aligned stores.
+    let end = dest.add(rem) as usize;
+    let tail = end & 31;
+    if tail != 0 {
+        rem -= tail;
+        memmove_small_overlap(dest.add(rem), src.add(rem), tail);
+    }
+
+    // Descend in larger chunks and load each chunk fully before stores.
+    // This reduces branch/loop overhead in the hot overlap-backward path.
     while rem >= 256 {
         rem -= 256;
         let s = src.add(rem);
@@ -209,34 +219,31 @@ unsafe fn memmove_backward_avx2(dest: *mut u8, src: *const u8, n: usize) {
         let v6 = _mm256_loadu_si256(s.add(192) as *const __m256i);
         let v7 = _mm256_loadu_si256(s.add(224) as *const __m256i);
 
-        _mm256_storeu_si256(d.add(224) as *mut __m256i, v7);
-        _mm256_storeu_si256(d.add(192) as *mut __m256i, v6);
-        _mm256_storeu_si256(d.add(160) as *mut __m256i, v5);
-        _mm256_storeu_si256(d.add(128) as *mut __m256i, v4);
-        _mm256_storeu_si256(d.add(96) as *mut __m256i, v3);
-        _mm256_storeu_si256(d.add(64) as *mut __m256i, v2);
-        _mm256_storeu_si256(d.add(32) as *mut __m256i, v1);
-        _mm256_storeu_si256(d as *mut __m256i, v0);
+        _mm256_store_si256(d as *mut __m256i, v0);
+        _mm256_store_si256(d.add(32) as *mut __m256i, v1);
+        _mm256_store_si256(d.add(64) as *mut __m256i, v2);
+        _mm256_store_si256(d.add(96) as *mut __m256i, v3);
+        _mm256_store_si256(d.add(128) as *mut __m256i, v4);
+        _mm256_store_si256(d.add(160) as *mut __m256i, v5);
+        _mm256_store_si256(d.add(192) as *mut __m256i, v6);
+        _mm256_store_si256(d.add(224) as *mut __m256i, v7);
     }
 
-    while rem >= 128 {
-        rem -= 128;
+    // Finish in cache-line chunks.
+    while rem >= 64 {
+        rem -= 64;
         let s = src.add(rem);
         let d = dest.add(rem);
         let v0 = _mm256_loadu_si256(s as *const __m256i);
         let v1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
-        let v2 = _mm256_loadu_si256(s.add(64) as *const __m256i);
-        let v3 = _mm256_loadu_si256(s.add(96) as *const __m256i);
-        _mm256_storeu_si256(d.add(96) as *mut __m256i, v3);
-        _mm256_storeu_si256(d.add(64) as *mut __m256i, v2);
-        _mm256_storeu_si256(d.add(32) as *mut __m256i, v1);
-        _mm256_storeu_si256(d as *mut __m256i, v0);
+        _mm256_store_si256(d as *mut __m256i, v0);
+        _mm256_store_si256(d.add(32) as *mut __m256i, v1);
     }
 
     while rem >= 32 {
         rem -= 32;
         let v = _mm256_loadu_si256(src.add(rem) as *const __m256i);
-        _mm256_storeu_si256(dest.add(rem) as *mut __m256i, v);
+        _mm256_store_si256(dest.add(rem) as *mut __m256i, v);
     }
 
     if rem > 0 {

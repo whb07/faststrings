@@ -14,6 +14,11 @@ fn last_set_bit(mask: i32) -> usize {
     31 - (mask as u32).leading_zeros() as usize
 }
 
+#[inline(always)]
+fn has_zero_byte_u64(x: u64) -> bool {
+    ((x.wrapping_sub(0x0101_0101_0101_0101)) & !x & 0x8080_8080_8080_8080) != 0
+}
+
 /// High-performance memchr over exactly `n` bytes.
 ///
 /// Returns the index of the first matching byte.
@@ -88,19 +93,55 @@ unsafe fn optimized_memrchr_scalar(s: *const u8, n: usize, needle: u8) -> Option
     None
 }
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
-unsafe fn match_mask_32(s: *const u8, needle_v: __m256i) -> i32 {
-    let v = unsafe { _mm256_loadu_si256(s as *const __m256i) };
-    let eq = _mm256_cmpeq_epi8(v, needle_v);
-    _mm256_movemask_epi8(eq)
+#[inline(always)]
+unsafe fn optimized_memchr_scalar_wide(s: *const u8, n: usize, needle: u8) -> Option<usize> {
+    let needle_64 = u64::from_ne_bytes([needle; 8]);
+    let mut i = 0usize;
+
+    while i + 8 <= n {
+        let word = core::ptr::read_unaligned(s.add(i) as *const u64);
+        if has_zero_byte_u64(word ^ needle_64) {
+            let mut j = 0usize;
+            while j < 8 {
+                if *s.add(i + j) == needle {
+                    return Some(i + j);
+                }
+                j += 1;
+            }
+        }
+        i += 8;
+    }
+
+    optimized_memchr_scalar(s.add(i), n - i, needle).map(|tail| i + tail)
+}
+
+#[inline(always)]
+unsafe fn optimized_memrchr_scalar_wide(s: *const u8, n: usize, needle: u8) -> Option<usize> {
+    let needle_64 = u64::from_ne_bytes([needle; 8]);
+    let mut i = n;
+
+    while i >= 8 {
+        i -= 8;
+        let word = core::ptr::read_unaligned(s.add(i) as *const u64);
+        if has_zero_byte_u64(word ^ needle_64) {
+            let mut j = 8usize;
+            while j > 0 {
+                j -= 1;
+                if *s.add(i + j) == needle {
+                    return Some(i + j);
+                }
+            }
+        }
+    }
+
+    optimized_memrchr_scalar(s, i, needle)
 }
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn optimized_memchr_avx2(s: *const u8, n: usize, needle: u8) -> Option<usize> {
-    if n < 32 {
-        return unsafe { optimized_memchr_scalar(s, n, needle) };
+    if n < 64 {
+        return unsafe { optimized_memchr_scalar_wide(s, n, needle) };
     }
 
     let needle_v = _mm256_set1_epi8(needle as i8);
@@ -112,46 +153,61 @@ unsafe fn optimized_memchr_avx2(s: *const u8, n: usize, needle: u8) -> Option<us
         let p2 = unsafe { s.add(i + 64) };
         let p3 = unsafe { s.add(i + 96) };
 
-        let m0 = unsafe { match_mask_32(p0, needle_v) };
+        let v0 = _mm256_loadu_si256(p0 as *const __m256i);
+        let v1 = _mm256_loadu_si256(p1 as *const __m256i);
+        let v2 = _mm256_loadu_si256(p2 as *const __m256i);
+        let v3 = _mm256_loadu_si256(p3 as *const __m256i);
+        let eq0 = _mm256_cmpeq_epi8(v0, needle_v);
+        let eq1 = _mm256_cmpeq_epi8(v1, needle_v);
+        let eq2 = _mm256_cmpeq_epi8(v2, needle_v);
+        let eq3 = _mm256_cmpeq_epi8(v3, needle_v);
+        let any = _mm256_or_si256(_mm256_or_si256(eq0, eq1), _mm256_or_si256(eq2, eq3));
+
+        if _mm256_testz_si256(any, any) == 1 {
+            i += 128;
+            continue;
+        }
+
+        let m0 = _mm256_movemask_epi8(eq0);
         if m0 != 0 {
             return Some(i + first_set_bit(m0));
         }
 
-        let m1 = unsafe { match_mask_32(p1, needle_v) };
+        let m1 = _mm256_movemask_epi8(eq1);
         if m1 != 0 {
             return Some(i + 32 + first_set_bit(m1));
         }
 
-        let m2 = unsafe { match_mask_32(p2, needle_v) };
+        let m2 = _mm256_movemask_epi8(eq2);
         if m2 != 0 {
             return Some(i + 64 + first_set_bit(m2));
         }
 
-        let m3 = unsafe { match_mask_32(p3, needle_v) };
+        let m3 = _mm256_movemask_epi8(eq3);
         if m3 != 0 {
             return Some(i + 96 + first_set_bit(m3));
         }
-
-        i += 128;
     }
 
     while i + 32 <= n {
-        let p = unsafe { s.add(i) };
-        let m = unsafe { match_mask_32(p, needle_v) };
+        let p = s.add(i);
+        let v = _mm256_loadu_si256(p as *const __m256i);
+        let eq = _mm256_cmpeq_epi8(v, needle_v);
+        let m = _mm256_movemask_epi8(eq);
         if m != 0 {
             return Some(i + first_set_bit(m));
         }
         i += 32;
     }
 
-    unsafe { optimized_memchr_scalar(s.add(i), n - i, needle).map(|tail| i + tail) }
+    unsafe { optimized_memchr_scalar_wide(s.add(i), n - i, needle).map(|tail| i + tail) }
 }
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn optimized_memrchr_avx2(s: *const u8, n: usize, needle: u8) -> Option<usize> {
-    if n < 32 {
-        return unsafe { optimized_memrchr_scalar(s, n, needle) };
+    if n < 64 {
+        return unsafe { optimized_memrchr_scalar_wide(s, n, needle) };
     }
 
     let needle_v = _mm256_set1_epi8(needle as i8);
@@ -160,44 +216,62 @@ unsafe fn optimized_memrchr_avx2(s: *const u8, n: usize, needle: u8) -> Option<u
     while i >= 128 {
         let base = i - 128;
 
-        let p3 = unsafe { s.add(base + 96) };
-        let m3 = unsafe { match_mask_32(p3, needle_v) };
+        let p0 = s.add(base);
+        let p1 = s.add(base + 32);
+        let p2 = s.add(base + 64);
+        let p3 = s.add(base + 96);
+
+        let v0 = _mm256_loadu_si256(p0 as *const __m256i);
+        let v1 = _mm256_loadu_si256(p1 as *const __m256i);
+        let v2 = _mm256_loadu_si256(p2 as *const __m256i);
+        let v3 = _mm256_loadu_si256(p3 as *const __m256i);
+        let eq0 = _mm256_cmpeq_epi8(v0, needle_v);
+        let eq1 = _mm256_cmpeq_epi8(v1, needle_v);
+        let eq2 = _mm256_cmpeq_epi8(v2, needle_v);
+        let eq3 = _mm256_cmpeq_epi8(v3, needle_v);
+        let any = _mm256_or_si256(_mm256_or_si256(eq0, eq1), _mm256_or_si256(eq2, eq3));
+
+        if _mm256_testz_si256(any, any) == 1 {
+            i = base;
+            continue;
+        }
+
+        let m3 = _mm256_movemask_epi8(eq3);
         if m3 != 0 {
             return Some(base + 96 + last_set_bit(m3));
         }
 
-        let p2 = unsafe { s.add(base + 64) };
-        let m2 = unsafe { match_mask_32(p2, needle_v) };
+        let m2 = _mm256_movemask_epi8(eq2);
         if m2 != 0 {
             return Some(base + 64 + last_set_bit(m2));
         }
 
-        let p1 = unsafe { s.add(base + 32) };
-        let m1 = unsafe { match_mask_32(p1, needle_v) };
+        let m1 = _mm256_movemask_epi8(eq1);
         if m1 != 0 {
             return Some(base + 32 + last_set_bit(m1));
         }
 
-        let p0 = unsafe { s.add(base) };
-        let m0 = unsafe { match_mask_32(p0, needle_v) };
+        let m0 = _mm256_movemask_epi8(eq0);
         if m0 != 0 {
             return Some(base + last_set_bit(m0));
         }
 
-        i = base;
+        debug_assert!(_mm256_testz_si256(any, any) == 0);
     }
 
     while i >= 32 {
         let base = i - 32;
-        let p = unsafe { s.add(base) };
-        let m = unsafe { match_mask_32(p, needle_v) };
+        let p = s.add(base);
+        let v = _mm256_loadu_si256(p as *const __m256i);
+        let eq = _mm256_cmpeq_epi8(v, needle_v);
+        let m = _mm256_movemask_epi8(eq);
         if m != 0 {
             return Some(base + last_set_bit(m));
         }
         i = base;
     }
 
-    unsafe { optimized_memrchr_scalar(s, i, needle) }
+    unsafe { optimized_memrchr_scalar_wide(s, i, needle) }
 }
 
 #[cfg(test)]

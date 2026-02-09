@@ -91,6 +91,60 @@ unsafe fn strspn_small_set_avx2(s: &[u8], accept: &[u8]) -> usize {
     len
 }
 
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn find_first_any_small_set_avx2(s: &[u8], set: &[u8]) -> Option<usize> {
+    let len = s.len();
+    let mut i = 0usize;
+
+    let a0 = _mm256_set1_epi8(set[0] as i8);
+    let a1 = if set.len() >= 2 {
+        _mm256_set1_epi8(set[1] as i8)
+    } else {
+        _mm256_setzero_si256()
+    };
+    let a2 = if set.len() >= 3 {
+        _mm256_set1_epi8(set[2] as i8)
+    } else {
+        _mm256_setzero_si256()
+    };
+    let a3 = if set.len() >= 4 {
+        _mm256_set1_epi8(set[3] as i8)
+    } else {
+        _mm256_setzero_si256()
+    };
+
+    while i + 32 <= len {
+        let chunk = _mm256_loadu_si256(s.as_ptr().add(i) as *const __m256i);
+
+        let mut eq = _mm256_cmpeq_epi8(chunk, a0);
+        if set.len() >= 2 {
+            eq = _mm256_or_si256(eq, _mm256_cmpeq_epi8(chunk, a1));
+        }
+        if set.len() >= 3 {
+            eq = _mm256_or_si256(eq, _mm256_cmpeq_epi8(chunk, a2));
+        }
+        if set.len() >= 4 {
+            eq = _mm256_or_si256(eq, _mm256_cmpeq_epi8(chunk, a3));
+        }
+
+        let mask = _mm256_movemask_epi8(eq) as u32;
+        if mask != 0 {
+            return Some(i + mask.trailing_zeros() as usize);
+        }
+        i += 32;
+    }
+
+    while i < len {
+        if contains_small_set(set, s[i]) {
+            return Some(i);
+        }
+        i += 1;
+    }
+
+    None
+}
+
 /// Locate character in null-terminated string
 ///
 /// Returns the index of the first occurrence of `c` in `s` (up to the null terminator),
@@ -283,6 +337,12 @@ pub fn strcspn(s: &[u8], reject: &[u8]) -> usize {
     }
 
     if reject.len() <= 4 {
+        #[cfg(target_arch = "x86_64")]
+        if s.len() >= 64 {
+            // SAFETY: AVX2 is baseline for this project.
+            return unsafe { find_first_any_small_set_avx2(s, reject) }.unwrap_or(s.len());
+        }
+
         for (i, &c) in s.iter().enumerate() {
             if contains_small_set(reject, c) {
                 return i;
@@ -327,6 +387,12 @@ pub fn strpbrk(s: &[u8], accept: &[u8]) -> Option<usize> {
     }
 
     if accept.len() <= 4 {
+        #[cfg(target_arch = "x86_64")]
+        if s.len() >= 64 {
+            // SAFETY: AVX2 is baseline for this project.
+            return unsafe { find_first_any_small_set_avx2(s, accept) };
+        }
+
         for (i, &c) in s.iter().enumerate() {
             if contains_small_set(accept, c) {
                 return Some(i);

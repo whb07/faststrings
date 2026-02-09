@@ -49,11 +49,11 @@
 | `strpbrk` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/12 wins; first/mid/tail and miss patterns all regress versus glibc |
 | `index` | BSD legacy | yes | partial | no | Alias of `strchr`; inherits current `strchr` benchmark profile (0/30 wins) |
 | `rindex` | BSD legacy | yes | partial | no | Alias of `strrchr`; inherits current `strrchr` benchmark profile (0/30 wins) |
-| `strtok` | C/POSIX | yes | no | unknown | safe state-based API |
-| `strtok_r` | POSIX | yes | no | unknown |  |
+| `strtok` | C/POSIX | yes | partial | no | Dedicated benchmark run is 1/3 wins; near-parity at 256B token streams but large (4KiB) tokenization remains much slower |
+| `strtok_r` | POSIX | yes | partial | no | Dedicated benchmark run is 1/3 wins; slight edge at 256B, but 4KiB tokenization is still significantly behind glibc |
 | `strxfrm` | C/POSIX | yes | partial | no | Dedicated benchmark run is 4/6 wins in C-locale copy-like cases, but 4KiB paths still regress so this is not a consistent overall win |
-| `strdup` | POSIX | yes | no | unknown |  |
-| `strndup` | POSIX | yes | no | unknown |  |
+| `strdup` | POSIX | yes | partial | no | Dedicated benchmark run is 1/3 wins; very strong large-string win, but small/medium sizes remain slower overall |
+| `strndup` | POSIX | yes | partial | no | Dedicated benchmark run is 0/6 wins; truncating and full-dup scenarios all regress versus glibc |
 | `strerror` | C/POSIX | no | no | unknown | deferred for now |
 | `strerror_r` | POSIX | no | no | unknown | deferred for now |
 

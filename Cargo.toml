@@ -71,3 +71,7 @@ harness = false
 [[bench]]
 name = "strcopy"
 harness = false
+
+[[bench]]
+name = "strstate"
+harness = false

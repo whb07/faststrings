@@ -10,9 +10,9 @@
 ## Narrow String and Memory APIs
 | Function | Standard/Origin | Implemented | Benchmarked | Faster than glibc | Notes |
 |---|---|---:|---:|---:|---|
-| `memcpy` | C/POSIX | yes | yes | no | AVX2 tuned with 63/64-byte cliff handling; latest full run wins 46/62 but still loses on several 95-1024B cases and 8MiB +/- 1 |
-| `memmove` | C/POSIX | yes | partial | no | New AVX2+`rep movsb` overlap-aware path benchmarked on targeted subset; current result wins 3/16, with major backward-overlap regressions (1024B and 256KiB cases) |
-| `memset` | C/POSIX | yes | yes | no | AVX2/NT tuned with 480-512-byte fast path; latest full run wins 57/68, with remaining misses around 64B misalignment, some 256B-alignment cases, and 1MiB |
+| `memcpy` | C/POSIX | yes | yes | no | AVX2 tuned with 63/64-byte cliff handling; latest full run wins 49/62 with remaining losses centered on 95-1024B cliffs and 8MiB +/- 1 |
+| `memmove` | C/POSIX | yes | partial | no | AVX2 overlap path now uses 1MiB `rep movsb` thresholds; focused 1024B/256KiB subset improved to wins 7/14, but backward-overlap cases still lag badly |
+| `memset` | C/POSIX | yes | yes | no | AVX2/NT tuned with 480-512-byte fast path; latest full run wins 54/68, with remaining misses around 64B misalignment, 256B alignment corners, and 1MiB |
 | `memcmp` | C/POSIX | yes | no | unknown |  |
 | `memchr` | C/POSIX | yes | no | unknown |  |
 | `memrchr` | GNU/POSIX ext | yes | no | unknown |  |

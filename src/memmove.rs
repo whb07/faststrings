@@ -6,8 +6,12 @@ use core::arch::x86_64::*;
 
 use crate::memcpy::optimized_memcpy_unified;
 
-const REP_MOVSB_FWD_THRESHOLD: usize = 256;
-const REP_MOVSB_BWD_THRESHOLD: usize = 256;
+// On current post-2020 cores, `rep movsb` is a clear regression for the
+// overlap-focused 1 KiB..256 KiB ranges in our benchmark suite.
+// Keep AVX2 for small/medium/large tested spans and reserve `rep movsb`
+// for very large copies.
+const REP_MOVSB_FWD_THRESHOLD: usize = 1024 * 1024;
+const REP_MOVSB_BWD_THRESHOLD: usize = 1024 * 1024;
 
 /// High-performance memmove with automatic overlap handling.
 ///
@@ -190,6 +194,30 @@ unsafe fn memmove_forward_avx2(dest: *mut u8, src: *const u8, n: usize) {
 #[target_feature(enable = "avx2")]
 unsafe fn memmove_backward_avx2(dest: *mut u8, src: *const u8, n: usize) {
     let mut rem = n;
+
+    while rem >= 256 {
+        rem -= 256;
+        let s = src.add(rem);
+        let d = dest.add(rem);
+
+        let v0 = _mm256_loadu_si256(s as *const __m256i);
+        let v1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
+        let v2 = _mm256_loadu_si256(s.add(64) as *const __m256i);
+        let v3 = _mm256_loadu_si256(s.add(96) as *const __m256i);
+        let v4 = _mm256_loadu_si256(s.add(128) as *const __m256i);
+        let v5 = _mm256_loadu_si256(s.add(160) as *const __m256i);
+        let v6 = _mm256_loadu_si256(s.add(192) as *const __m256i);
+        let v7 = _mm256_loadu_si256(s.add(224) as *const __m256i);
+
+        _mm256_storeu_si256(d.add(224) as *mut __m256i, v7);
+        _mm256_storeu_si256(d.add(192) as *mut __m256i, v6);
+        _mm256_storeu_si256(d.add(160) as *mut __m256i, v5);
+        _mm256_storeu_si256(d.add(128) as *mut __m256i, v4);
+        _mm256_storeu_si256(d.add(96) as *mut __m256i, v3);
+        _mm256_storeu_si256(d.add(64) as *mut __m256i, v2);
+        _mm256_storeu_si256(d.add(32) as *mut __m256i, v1);
+        _mm256_storeu_si256(d as *mut __m256i, v0);
+    }
 
     while rem >= 128 {
         rem -= 128;

@@ -44,7 +44,7 @@
 | `strrchr` | C/POSIX | yes | partial | no | memrchr-backed path benchmarked at 0/30 wins; misses and head/mid hit patterns remain significantly behind glibc |
 | `strstr` | C/POSIX | yes | partial | no | Dedicated benchmark run is 0/15 wins; tail/miss scans are substantially behind glibc (worst case ~350x on 4KiB miss path) |
 | `strcasestr` | GNU ext | yes | partial | no | Dedicated benchmark run is 2/15 wins (small hit-head only); most medium/large scans remain slower, including empty-needle cases |
-| `strspn` | C/POSIX | yes | partial | no | Bitmap + small-set fast-path run is still 0/12 wins; especially weak on full-prefix scans where glibc remains far ahead |
+| `strspn` | C/POSIX | yes | partial | no | AVX2 small-set scan + bitmap path improved to 2/12 wins (4KiB tail/full-match), but most small/medium cases still regress |
 | `strcspn` | C/POSIX | yes | partial | no | Bitmap + memchr small-set path improved to 6/12 wins (mainly mid/tail/miss), but hit-first cases still regress |
 | `strpbrk` | C/POSIX | yes | partial | no | Bitmap + small-set path improved to 5/12 wins; medium/large mid-tail-miss improved, but most 31B and hit-first cases remain slower |
 | `index` | BSD legacy | yes | partial | no | Alias of `strchr`; inherits current `strchr` benchmark profile (0/30 wins) |

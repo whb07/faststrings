@@ -39,3 +39,11 @@ harness = false
 [[bench]]
 name = "bsd_mem"
 harness = false
+
+[[bench]]
+name = "memccpy"
+harness = false
+
+[[bench]]
+name = "memmem"
+harness = false

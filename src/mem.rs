@@ -140,15 +140,19 @@ pub fn memrchr(s: &[u8], c: u8) -> Option<usize> {
 /// ```
 pub fn memccpy(dest: &mut [u8], src: &[u8], c: u8) -> Option<usize> {
     let n = dest.len().min(src.len());
-
-    for i in 0..n {
-        dest[i] = src[i];
-        if src[i] == c {
-            return Some(i + 1);
-        }
+    if n == 0 {
+        return None;
     }
 
-    None
+    let stop = memchr(&src[..n], c);
+    let copy_len = stop.map_or(n, |idx| idx + 1);
+
+    // SAFETY: Both pointers come from valid slices and `copy_len <= n <= len`.
+    unsafe {
+        crate::memcpy::optimized_memcpy_unified(dest.as_mut_ptr(), src.as_ptr(), copy_len);
+    }
+
+    stop.map(|idx| idx + 1)
 }
 
 /// Find a substring in a byte slice
@@ -172,9 +176,33 @@ pub fn memmem(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         return None;
     }
 
-    let end = haystack.len() - needle.len() + 1;
+    if needle.len() == 1 {
+        return memchr(haystack, needle[0]);
+    }
 
-    (0..end).find(|&i| &haystack[i..i + needle.len()] == needle)
+    let needle_len = needle.len();
+    let first = needle[0];
+    let last = needle[needle_len - 1];
+    let max_start = haystack.len() - needle_len;
+    let mut search_start = 0usize;
+
+    while search_start <= max_start {
+        let rel = match memchr(&haystack[search_start..max_start + 1], first) {
+            Some(pos) => pos,
+            None => return None,
+        };
+        let idx = search_start + rel;
+
+        if haystack[idx + needle_len - 1] == last
+            && memcmp_n(&haystack[idx..idx + needle_len], needle, needle_len) == 0
+        {
+            return Some(idx);
+        }
+
+        search_start = idx + 1;
+    }
+
+    None
 }
 
 /// Set memory to zero (secure-ish in safe Rust)

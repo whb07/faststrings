@@ -16,8 +16,8 @@
 | `memcmp` | C/POSIX | yes | partial | no | AVX2 draft + focused benchmark harness are in place; latest captured run is 13/78 wins, with major regressions on 31-256B equal/diff-last paths |
 | `memchr` | C/POSIX | yes | partial | no | AVX2 scan path + criterion harness landed; focused run is 22/54 wins, with regressions concentrated at 31/63B misses and 4KiB full-scan cases |
 | `memrchr` | GNU/POSIX ext | yes | partial | no | AVX2 reverse-scan path + criterion harness landed; focused run is 8/54 wins, with large miss-path regressions (especially 31/63B and 4KiB scans) |
-| `memccpy` | C/POSIX | yes | no | unknown |  |
-| `memmem` | GNU ext | yes | no | unknown |  |
+| `memccpy` | C/POSIX | yes | partial | no | New memchr+copy implementation benchmarked at 12/28 wins; faster on early-stop and large-size misses, but 31/63B stop-last and miss paths regress notably |
+| `memmem` | GNU ext | yes | partial | no | New candidate-filtered memmem path benchmarked at 37/48 wins; strong gains for `needle` lengths >=4, but `needle` length 1 mid/tail/miss scans remain 1.5-2.5x slower |
 | `explicit_bzero` | BSD/GNU ext | yes | partial | no | New dedicated bench run is 16/21 wins; strong gains at 31-256B, but slight regressions remain around 4KiB alignment corners |
 | `bzero` | BSD legacy | yes | partial | no | New dedicated bench run is 18/21 wins; fast on 31-1024B and 64KiB, but 4KiB aligned cases are still a little slower |
 | `bcmp` | BSD legacy | yes | partial | no | New dedicated bench run is 1/28 wins; current memcmp-backed path regresses heavily on 63-256B equal/diff-last cases |

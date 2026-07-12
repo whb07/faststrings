@@ -4,8 +4,12 @@
 use core::arch::x86_64::*;
 
 /// High-performance memcpy with automatic dispatch.
-/// This entry point is NOT marked with AVX2 to ensure that small copies
-/// never trigger AVX power-up latency (the "AVX Entry Fee").
+///
+/// Dispatch (AVX2 baseline):
+/// - `0..32`: GPR / SSE overlapping ladder (avoids AVX entry on tiny copies)
+/// - `32..128`: AVX2 overlapping YMM (matches glibc VEC=32 size classes)
+/// - exact `128` / `256`: branch-free AVX2 leaves
+/// - otherwise medium, then NT above [`NT_THRESHOLD`]
 ///
 /// # Safety
 ///
@@ -14,19 +18,24 @@ use core::arch::x86_64::*;
 /// - AVX2 must be supported if the AVX2 path is taken
 #[inline(always)]
 pub unsafe fn optimized_memcpy_unified(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    // Small sizes first so 1–127 never pay the exact-128/256 compares.
+    if n < 32 {
+        return optimized_memcpy_sse_tiny(dest, src, n);
+    }
+    if n < 128 {
+        return optimized_memcpy_avx2_small(dest, src, n);
+    }
+
     // Exact 128/256: jump straight into a branch-free AVX leaf. Avoids the
     // medium dispatcher hop that showed up as `jmp *rel` in the ABI-fair bench.
-    if n == 256 {
-        return optimized_memcpy_avx2_exact_256(dest, src);
-    }
     if n == 128 {
         return optimized_memcpy_avx2_exact_128(dest, src);
     }
+    if n == 256 {
+        return optimized_memcpy_avx2_exact_256(dest, src);
+    }
 
-    // SSE through 127 avoids AVX entry on other small copies.
-    if n < 128 {
-        optimized_memcpy_sse_small(dest, src, n)
-    } else if n < NT_THRESHOLD {
+    if n < NT_THRESHOLD {
         optimized_memcpy_avx2_medium(dest, src, n)
     } else {
         optimized_memcpy_avx2_nt(dest, src, n)
@@ -34,66 +43,17 @@ pub unsafe fn optimized_memcpy_unified(dest: *mut u8, src: *const u8, n: usize) 
 }
 
 // =============================================================================
-// SMALL PATH: SSE2 Implementation (0-127 bytes)
+// TINY PATH: GPR / SSE2 (0-31 bytes)
 // =============================================================================
 
 #[inline(always)]
-unsafe fn optimized_memcpy_sse_small(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
-    // n < 128 guaranteed by dispatch
+unsafe fn optimized_memcpy_sse_tiny(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    // n < 32 guaranteed by dispatch
     // SAFETY: Unaligned loads/stores are valid for any alignment; caller
     // guarantees `src`/`dest` are valid for `n` bytes and non-overlapping.
 
-    if n >= 64 {
-        // Head: always 64 bytes.
-        let h0 = _mm_loadu_si128(src as *const __m128i);
-        let h1 = _mm_loadu_si128(src.add(16) as *const __m128i);
-        let h2 = _mm_loadu_si128(src.add(32) as *const __m128i);
-        let h3 = _mm_loadu_si128(src.add(48) as *const __m128i);
-        _mm_storeu_si128(dest as *mut __m128i, h0);
-        _mm_storeu_si128(dest.add(16) as *mut __m128i, h1);
-        _mm_storeu_si128(dest.add(32) as *mut __m128i, h2);
-        _mm_storeu_si128(dest.add(48) as *mut __m128i, h3);
-
-        if n > 64 {
-            if n <= 96 {
-                // 65-96: 64B head + 32B overlapping tail (96B mem ops, not 128).
-                let t0 = _mm_loadu_si128(src.add(n - 32) as *const __m128i);
-                let t1 = _mm_loadu_si128(src.add(n - 16) as *const __m128i);
-                _mm_storeu_si128(dest.add(n - 32) as *mut __m128i, t0);
-                _mm_storeu_si128(dest.add(n - 16) as *mut __m128i, t1);
-            } else {
-                // 97-127: 64B head + 64B overlapping tail.
-                let t0 = _mm_loadu_si128(src.add(n - 64) as *const __m128i);
-                let t1 = _mm_loadu_si128(src.add(n - 48) as *const __m128i);
-                let t2 = _mm_loadu_si128(src.add(n - 32) as *const __m128i);
-                let t3 = _mm_loadu_si128(src.add(n - 16) as *const __m128i);
-                _mm_storeu_si128(dest.add(n - 64) as *mut __m128i, t0);
-                _mm_storeu_si128(dest.add(n - 48) as *mut __m128i, t1);
-                _mm_storeu_si128(dest.add(n - 32) as *mut __m128i, t2);
-                _mm_storeu_si128(dest.add(n - 16) as *mut __m128i, t3);
-            }
-        }
-        return dest;
-    }
-
-    if n >= 32 {
-        // 32-63 bytes: 4 × 16-byte loads/stores (overlapping)
-        let v0 = _mm_loadu_si128(src as *const __m128i);
-        let v1 = _mm_loadu_si128(src.add(16) as *const __m128i);
-        let v2 = _mm_loadu_si128(src.add(n - 32) as *const __m128i);
-        let v3 = _mm_loadu_si128(src.add(n - 16) as *const __m128i);
-
-        _mm_storeu_si128(dest as *mut __m128i, v0);
-        _mm_storeu_si128(dest.add(16) as *mut __m128i, v1);
-        _mm_storeu_si128(dest.add(n - 32) as *mut __m128i, v2);
-        _mm_storeu_si128(dest.add(n - 16) as *mut __m128i, v3);
-        return dest;
-    }
-
     if n >= 16 {
         // 16-31 bytes: 2 × 16-byte loads/stores (overlapping)
-        // SAFETY: Unaligned loads/stores are valid for any alignment; caller
-        // guarantees `src`/`dest` are valid for `n` bytes and non-overlapping.
         let v0 = _mm_loadu_si128(src as *const __m128i);
         let v1 = _mm_loadu_si128(src.add(n - 16) as *const __m128i);
         _mm_storeu_si128(dest as *mut __m128i, v0);
@@ -103,8 +63,6 @@ unsafe fn optimized_memcpy_sse_small(dest: *mut u8, src: *const u8, n: usize) ->
 
     if n >= 8 {
         // 8-15 bytes: 2 × 8-byte loads/stores (overlapping)
-        // SAFETY: read_unaligned/write_unaligned allow any alignment; caller
-        // guarantees `src` is readable and `dest` writable for `n` bytes.
         let a = core::ptr::read_unaligned(src as *const u64);
         let b = core::ptr::read_unaligned(src.add(n - 8) as *const u64);
         core::ptr::write_unaligned(dest as *mut u64, a);
@@ -114,8 +72,6 @@ unsafe fn optimized_memcpy_sse_small(dest: *mut u8, src: *const u8, n: usize) ->
 
     if n >= 4 {
         // 4-7 bytes: 2 × 4-byte loads/stores (overlapping)
-        // SAFETY: read_unaligned/write_unaligned allow any alignment; caller
-        // guarantees `src` is readable and `dest` writable for `n` bytes.
         let a = core::ptr::read_unaligned(src as *const u32);
         let b = core::ptr::read_unaligned(src.add(n - 4) as *const u32);
         core::ptr::write_unaligned(dest as *mut u32, a);
@@ -125,8 +81,6 @@ unsafe fn optimized_memcpy_sse_small(dest: *mut u8, src: *const u8, n: usize) ->
 
     if n >= 2 {
         // 2-3 bytes: 2 × 2-byte loads/stores (overlapping)
-        // SAFETY: read_unaligned/write_unaligned allow any alignment; caller
-        // guarantees `src` is readable and `dest` writable for `n` bytes.
         let a = core::ptr::read_unaligned(src as *const u16);
         let b = core::ptr::read_unaligned(src.add(n - 2) as *const u16);
         core::ptr::write_unaligned(dest as *mut u16, a);
@@ -138,6 +92,42 @@ unsafe fn optimized_memcpy_sse_small(dest: *mut u8, src: *const u8, n: usize) ->
         *dest = *src;
     }
 
+    dest
+}
+
+/// AVX2 overlapping copy for `32 <= n < 128` (glibc-style VEC=32 classes).
+#[target_feature(enable = "avx2")]
+unsafe fn optimized_memcpy_avx2_small(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    // SAFETY: Unaligned AVX loads/stores are valid for any alignment; caller
+    // guarantees `src`/`dest` are valid for `n` bytes and non-overlapping.
+    if n < 64 {
+        // 32-63: two overlapping YMM (exact 32 stores the same vector twice).
+        let v0 = _mm256_loadu_si256(src as *const __m256i);
+        let v1 = _mm256_loadu_si256(src.add(n - 32) as *const __m256i);
+        _mm256_storeu_si256(dest as *mut __m256i, v0);
+        _mm256_storeu_si256(dest.add(n - 32) as *mut __m256i, v1);
+        return dest;
+    }
+
+    if n == 64 {
+        // Exact 64: two sequential YMM (no overlap needed).
+        let h0 = _mm256_loadu_si256(src as *const __m256i);
+        let h1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
+        _mm256_storeu_si256(dest as *mut __m256i, h0);
+        _mm256_storeu_si256(dest.add(32) as *mut __m256i, h1);
+        return dest;
+    }
+
+    // 65-127: glibc `last_4x_vec` shape — always 4×YMM overlapping head/tail.
+    // Branch-free body; graduated 3×YMM for 65-96 lost to this at size 96.
+    let h0 = _mm256_loadu_si256(src as *const __m256i);
+    let h1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
+    let t0 = _mm256_loadu_si256(src.add(n - 64) as *const __m256i);
+    let t1 = _mm256_loadu_si256(src.add(n - 32) as *const __m256i);
+    _mm256_storeu_si256(dest as *mut __m256i, h0);
+    _mm256_storeu_si256(dest.add(32) as *mut __m256i, h1);
+    _mm256_storeu_si256(dest.add(n - 64) as *mut __m256i, t0);
+    _mm256_storeu_si256(dest.add(n - 32) as *mut __m256i, t1);
     dest
 }
 

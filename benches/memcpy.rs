@@ -1,7 +1,14 @@
 use core::ffi::c_void;
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{
+    AxisScale, BenchmarkId, Criterion, PlotConfiguration, Throughput, black_box, criterion_group,
+    criterion_main,
+};
 use faststrings::memcpy::optimized_memcpy_unified;
 use std::time::Duration;
+
+#[path = "original_memcpy.rs"]
+mod original;
+use original::optimized_memcpy_unified as original_optimized_memcpy_unified;
 
 unsafe extern "C" {
     #[link_name = "memcpy"]
@@ -35,8 +42,72 @@ fn configure_group_for_len(
     }
 }
 
+fn run_memcpy_cases(
+    c: &mut Criterion,
+    group_name: &str,
+    cases: &[CopyCase],
+    plot_scale: AxisScale,
+) {
+    let mut group = c.benchmark_group(group_name);
+    group.plot_config(PlotConfiguration::default().summary_scale(plot_scale));
+
+    for case in cases {
+        let len = case.len;
+        let src_off = case.src_off;
+        let dst_off = case.dst_off;
+
+        let alloc_len = len + 64;
+        let mut src = vec![0u8; alloc_len];
+        let mut dst = vec![0u8; alloc_len];
+        for (i, byte) in src.iter_mut().enumerate() {
+            *byte = (i % 251) as u8;
+        }
+
+        let src_ptr = unsafe { src.as_ptr().add(src_off) };
+        let dst_ptr = unsafe { dst.as_mut_ptr().add(dst_off) };
+
+        configure_group_for_len(&mut group, len);
+        group.throughput(Throughput::Bytes(len as u64));
+
+        group.bench_with_input(BenchmarkId::new("glibc", &case.label), &len, |b, &n| {
+            b.iter(|| unsafe {
+                libc_memcpy(
+                    black_box(dst_ptr as *mut c_void),
+                    black_box(src_ptr as *const c_void),
+                    black_box(n),
+                );
+                black_box(core::ptr::read_volatile(dst_ptr));
+            });
+        });
+
+        group.bench_with_input(
+            BenchmarkId::new("faststrings", &case.label),
+            &len,
+            |b, &n| {
+                b.iter(|| unsafe {
+                    optimized_memcpy_unified(black_box(dst_ptr), black_box(src_ptr), black_box(n));
+                    black_box(core::ptr::read_volatile(dst_ptr));
+                });
+            },
+        );
+
+        group.bench_with_input(BenchmarkId::new("original", &case.label), &len, |b, &n| {
+            b.iter(|| unsafe {
+                original_optimized_memcpy_unified(
+                    black_box(dst_ptr),
+                    black_box(src_ptr),
+                    black_box(n),
+                );
+                black_box(core::ptr::read_volatile(dst_ptr));
+            });
+        });
+    }
+
+    group.finish();
+}
+
 fn memcpy_benches(c: &mut Criterion) {
-    let mut cases = Vec::new();
+    let mut size_cases = Vec::new();
 
     // Size sweep includes threshold boundaries and cliff zones.
     let sizes = [
@@ -81,7 +152,7 @@ fn memcpy_benches(c: &mut Criterion) {
     ];
 
     for len in sizes {
-        cases.push(CopyCase {
+        size_cases.push(CopyCase {
             label: format!("size_{len}"),
             len,
             src_off: 0,
@@ -89,12 +160,16 @@ fn memcpy_benches(c: &mut Criterion) {
         });
     }
 
+    run_memcpy_cases(c, "memcpy_size", &size_cases, AxisScale::Logarithmic);
+
     // Alignment sweep at representative cliff sizes.
+    let mut align_cases = Vec::new();
     let align_sizes = [63usize, 64, 65, 256, 257, 4096];
     let align_pairs = [(0usize, 0usize), (1, 1), (15, 7), (31, 17)];
+
     for len in align_sizes {
         for (src_off, dst_off) in align_pairs {
-            cases.push(CopyCase {
+            align_cases.push(CopyCase {
                 label: format!("align_len{len}_s{src_off}_d{dst_off}"),
                 len,
                 src_off,
@@ -103,50 +178,7 @@ fn memcpy_benches(c: &mut Criterion) {
         }
     }
 
-    let mut group = c.benchmark_group("memcpy");
-
-    for case in &cases {
-        let len = case.len;
-        let src_off = case.src_off;
-        let dst_off = case.dst_off;
-
-        let alloc_len = len + 64;
-        let mut src = vec![0u8; alloc_len];
-        let mut dst = vec![0u8; alloc_len];
-        for (i, byte) in src.iter_mut().enumerate() {
-            *byte = (i % 251) as u8;
-        }
-
-        let src_ptr = unsafe { src.as_ptr().add(src_off) };
-        let dst_ptr = unsafe { dst.as_mut_ptr().add(dst_off) };
-
-        configure_group_for_len(&mut group, len);
-        group.throughput(Throughput::Bytes(len as u64));
-
-        group.bench_with_input(BenchmarkId::new("glibc", &case.label), &len, |b, &n| {
-            b.iter(|| unsafe {
-                libc_memcpy(
-                    black_box(dst_ptr as *mut c_void),
-                    black_box(src_ptr as *const c_void),
-                    black_box(n),
-                );
-                black_box(core::ptr::read_volatile(dst_ptr));
-            });
-        });
-
-        group.bench_with_input(
-            BenchmarkId::new("faststrings", &case.label),
-            &len,
-            |b, &n| {
-                b.iter(|| unsafe {
-                    optimized_memcpy_unified(black_box(dst_ptr), black_box(src_ptr), black_box(n));
-                    black_box(core::ptr::read_volatile(dst_ptr));
-                });
-            },
-        );
-    }
-
-    group.finish();
+    run_memcpy_cases(c, "memcpy_alignment", &align_cases, AxisScale::Linear);
 }
 
 criterion_group!(benches, memcpy_benches);

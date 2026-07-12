@@ -14,24 +14,32 @@ use core::arch::x86_64::*;
 /// - AVX2 must be supported if the AVX2 path is taken
 #[inline(always)]
 pub unsafe fn optimized_memcpy_unified(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
-    if n <= 128 {
-        // SSE/Scalar path: Legacy SSE encoding, no AVX transition penalty.
-        // Stays in SSE through 128B so the 65/129B cliffs do not pay AVX entry
-        // plus an oversized overlapping copy.
+    // Exact 128/256: jump straight into a branch-free AVX leaf. Avoids the
+    // medium dispatcher hop that showed up as `jmp *rel` in the ABI-fair bench.
+    if n == 256 {
+        return optimized_memcpy_avx2_exact_256(dest, src);
+    }
+    if n == 128 {
+        return optimized_memcpy_avx2_exact_128(dest, src);
+    }
+
+    // SSE through 127 avoids AVX entry on other small copies.
+    if n < 128 {
         optimized_memcpy_sse_small(dest, src, n)
+    } else if n < NT_THRESHOLD {
+        optimized_memcpy_avx2_medium(dest, src, n)
     } else {
-        // AVX path: Dispatches to specialized AVX2/NT logic.
-        optimized_memcpy_avx_dispatch(dest, src, n)
+        optimized_memcpy_avx2_nt(dest, src, n)
     }
 }
 
 // =============================================================================
-// SMALL PATH: SSE2 Implementation (0-128 bytes)
+// SMALL PATH: SSE2 Implementation (0-127 bytes)
 // =============================================================================
 
 #[inline(always)]
 unsafe fn optimized_memcpy_sse_small(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
-    // n <= 128 guaranteed by dispatch
+    // n < 128 guaranteed by dispatch
     // SAFETY: Unaligned loads/stores are valid for any alignment; caller
     // guarantees `src`/`dest` are valid for `n` bytes and non-overlapping.
 
@@ -54,7 +62,7 @@ unsafe fn optimized_memcpy_sse_small(dest: *mut u8, src: *const u8, n: usize) ->
                 _mm_storeu_si128(dest.add(n - 32) as *mut __m128i, t0);
                 _mm_storeu_si128(dest.add(n - 16) as *mut __m128i, t1);
             } else {
-                // 97-128: 64B head + 64B overlapping tail.
+                // 97-127: 64B head + 64B overlapping tail.
                 let t0 = _mm_loadu_si128(src.add(n - 64) as *const __m128i);
                 let t1 = _mm_loadu_si128(src.add(n - 48) as *const __m128i);
                 let t2 = _mm_loadu_si128(src.add(n - 32) as *const __m128i);
@@ -155,8 +163,22 @@ unsafe fn copy_64_avx2(d: *mut u8, s: *const u8) {
 
 #[target_feature(enable = "avx2")]
 unsafe fn copy_256_avx2(d: *mut u8, s: *const u8) {
-    copy_128_avx2(d, s);
-    copy_128_avx2(d.add(128), s.add(128));
+    let v0 = _mm256_loadu_si256(s as *const __m256i);
+    let v1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
+    let v2 = _mm256_loadu_si256(s.add(64) as *const __m256i);
+    let v3 = _mm256_loadu_si256(s.add(96) as *const __m256i);
+    let v4 = _mm256_loadu_si256(s.add(128) as *const __m256i);
+    let v5 = _mm256_loadu_si256(s.add(160) as *const __m256i);
+    let v6 = _mm256_loadu_si256(s.add(192) as *const __m256i);
+    let v7 = _mm256_loadu_si256(s.add(224) as *const __m256i);
+    _mm256_storeu_si256(d as *mut __m256i, v0);
+    _mm256_storeu_si256(d.add(32) as *mut __m256i, v1);
+    _mm256_storeu_si256(d.add(64) as *mut __m256i, v2);
+    _mm256_storeu_si256(d.add(96) as *mut __m256i, v3);
+    _mm256_storeu_si256(d.add(128) as *mut __m256i, v4);
+    _mm256_storeu_si256(d.add(160) as *mut __m256i, v5);
+    _mm256_storeu_si256(d.add(192) as *mut __m256i, v6);
+    _mm256_storeu_si256(d.add(224) as *mut __m256i, v7);
 }
 
 /// Copy `rem` bytes with overlapping AVX2 vectors sized to the remainder.
@@ -179,7 +201,10 @@ unsafe fn copy_remainder_avx2(d: *mut u8, s: *const u8, rem: usize) {
     }
 
     if rem <= 64 {
-        // 32-64: two overlapping 32B vectors.
+        if rem == 64 {
+            copy_64_avx2(d, s);
+            return;
+        }
         let v0 = _mm256_loadu_si256(s as *const __m256i);
         let v1 = _mm256_loadu_si256(s.add(rem - 32) as *const __m256i);
         _mm256_storeu_si256(d as *mut __m256i, v0);
@@ -188,7 +213,6 @@ unsafe fn copy_remainder_avx2(d: *mut u8, s: *const u8, rem: usize) {
     }
 
     if rem <= 96 {
-        // 65-96: 64B head + 32B tail.
         copy_64_avx2(d, s);
         let t = _mm256_loadu_si256(s.add(rem - 32) as *const __m256i);
         _mm256_storeu_si256(d.add(rem - 32) as *mut __m256i, t);
@@ -196,26 +220,27 @@ unsafe fn copy_remainder_avx2(d: *mut u8, s: *const u8, rem: usize) {
     }
 
     if rem <= 128 {
-        // 97-128: 64B head + 64B tail.
+        if rem == 128 {
+            copy_128_avx2(d, s);
+            return;
+        }
         copy_64_avx2(d, s);
         copy_64_avx2(d.add(rem - 64), s.add(rem - 64));
         return;
     }
 
     if rem <= 192 {
-        // 129-192: 128B head + 64B tail.
         copy_128_avx2(d, s);
         copy_64_avx2(d.add(rem - 64), s.add(rem - 64));
         return;
     }
 
-    // 193-256: 128B head + 128B tail.
     copy_128_avx2(d, s);
     copy_128_avx2(d.add(rem - 128), s.add(rem - 128));
 }
 
 // =============================================================================
-// AVX DISPATCHER: Centralizes AVX state and manages VZEROUPPER
+// AVX PATHS
 // =============================================================================
 
 // Fixed 16 MiB NT was a sharp cliff on reused destinations (hot-buffer benches).
@@ -223,44 +248,100 @@ unsafe fn copy_remainder_avx2(d: *mut u8, s: *const u8, rem: usize) {
 // with LLC-derived thresholds for true streaming workloads.
 const NT_THRESHOLD: usize = 64 * 1024 * 1024;
 
+/// Branch-free 128B AVX2 leaf (4×YMM load-all / store-all).
 #[target_feature(enable = "avx2")]
-unsafe fn optimized_memcpy_avx_dispatch(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
-    if n < NT_THRESHOLD {
-        optimized_memcpy_avx2_unaligned(dest, src, n);
-    } else {
-        optimized_memcpy_avx2_nt(dest, src, n);
-    }
-
+unsafe fn optimized_memcpy_avx2_exact_128(dest: *mut u8, src: *const u8) -> *mut u8 {
+    let a0 = _mm256_loadu_si256(src as *const __m256i);
+    let a1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
+    let a2 = _mm256_loadu_si256(src.add(64) as *const __m256i);
+    let a3 = _mm256_loadu_si256(src.add(96) as *const __m256i);
+    _mm256_storeu_si256(dest as *mut __m256i, a0);
+    _mm256_storeu_si256(dest.add(32) as *mut __m256i, a1);
+    _mm256_storeu_si256(dest.add(64) as *mut __m256i, a2);
+    _mm256_storeu_si256(dest.add(96) as *mut __m256i, a3);
     dest
 }
 
-// =============================================================================
-// MEDIUM PATH: AVX2 Unaligned Overlapping
-// =============================================================================
-
+/// Branch-free 256B AVX2 leaf (8×YMM load-all / store-all).
+/// Always uses unaligned ops (glibc VMOVU style); on Zen3 aligned addresses
+/// take the same fast path through `vmovups`.
 #[target_feature(enable = "avx2")]
-unsafe fn optimized_memcpy_avx2_unaligned(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
-    // Entrant sizes are > 128 (SSE covers 0..=128).
+unsafe fn optimized_memcpy_avx2_exact_256(dest: *mut u8, src: *const u8) -> *mut u8 {
+    let a0 = _mm256_loadu_si256(src as *const __m256i);
+    let a1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
+    let a2 = _mm256_loadu_si256(src.add(64) as *const __m256i);
+    let a3 = _mm256_loadu_si256(src.add(96) as *const __m256i);
+    let a4 = _mm256_loadu_si256(src.add(128) as *const __m256i);
+    let a5 = _mm256_loadu_si256(src.add(160) as *const __m256i);
+    let a6 = _mm256_loadu_si256(src.add(192) as *const __m256i);
+    let a7 = _mm256_loadu_si256(src.add(224) as *const __m256i);
+    _mm256_storeu_si256(dest as *mut __m256i, a0);
+    _mm256_storeu_si256(dest.add(32) as *mut __m256i, a1);
+    _mm256_storeu_si256(dest.add(64) as *mut __m256i, a2);
+    _mm256_storeu_si256(dest.add(96) as *mut __m256i, a3);
+    _mm256_storeu_si256(dest.add(128) as *mut __m256i, a4);
+    _mm256_storeu_si256(dest.add(160) as *mut __m256i, a5);
+    _mm256_storeu_si256(dest.add(192) as *mut __m256i, a6);
+    _mm256_storeu_si256(dest.add(224) as *mut __m256i, a7);
+    dest
+}
+
+/// Flattened medium/large AVX2 leaf (n > 128, n != 256, n < NT_THRESHOLD).
+///
+/// Exact 128/256 are handled by dedicated leaves from the unified entry.
+/// Neighbors use overlapping head/tail. Always `loadu`/`storeu`.
+#[target_feature(enable = "avx2")]
+unsafe fn optimized_memcpy_avx2_medium(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
     // SAFETY: Unaligned AVX loads/stores are valid for any alignment; caller
     // guarantees `src`/`dest` are valid for `n` bytes and non-overlapping.
+    // Entrant sizes are in 129..=255 or >= 257 (exact 128/256 peeled upstream).
 
-    // 1. 129-192: 128B head + 64B overlapping tail (192B mem ops, not 256).
+    // 129–192: 128B head + 64B overlapping tail (6×YMM, not 8).
     if n <= 192 {
-        copy_128_avx2(dest, src);
-        copy_64_avx2(dest.add(n - 64), src.add(n - 64));
+        let v0 = _mm256_loadu_si256(src as *const __m256i);
+        let v1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
+        let v2 = _mm256_loadu_si256(src.add(64) as *const __m256i);
+        let v3 = _mm256_loadu_si256(src.add(96) as *const __m256i);
+        let t0 = _mm256_loadu_si256(src.add(n - 64) as *const __m256i);
+        let t1 = _mm256_loadu_si256(src.add(n - 32) as *const __m256i);
+        _mm256_storeu_si256(dest as *mut __m256i, v0);
+        _mm256_storeu_si256(dest.add(32) as *mut __m256i, v1);
+        _mm256_storeu_si256(dest.add(64) as *mut __m256i, v2);
+        _mm256_storeu_si256(dest.add(96) as *mut __m256i, v3);
+        _mm256_storeu_si256(dest.add(n - 64) as *mut __m256i, t0);
+        _mm256_storeu_si256(dest.add(n - 32) as *mut __m256i, t1);
         return dest;
     }
 
-    // 2. 193-256: 128B head + 128B overlapping tail.
-    if n <= 256 {
-        copy_128_avx2(dest, src);
-        copy_128_avx2(dest.add(n - 128), src.add(n - 128));
+    // 193–255: 128B head + 128B overlapping tail.
+    if n < 256 {
+        let v0 = _mm256_loadu_si256(src as *const __m256i);
+        let v1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
+        let v2 = _mm256_loadu_si256(src.add(64) as *const __m256i);
+        let v3 = _mm256_loadu_si256(src.add(96) as *const __m256i);
+        let t0 = _mm256_loadu_si256(src.add(n - 128) as *const __m256i);
+        let t1 = _mm256_loadu_si256(src.add(n - 96) as *const __m256i);
+        let t2 = _mm256_loadu_si256(src.add(n - 64) as *const __m256i);
+        let t3 = _mm256_loadu_si256(src.add(n - 32) as *const __m256i);
+        _mm256_storeu_si256(dest as *mut __m256i, v0);
+        _mm256_storeu_si256(dest.add(32) as *mut __m256i, v1);
+        _mm256_storeu_si256(dest.add(64) as *mut __m256i, v2);
+        _mm256_storeu_si256(dest.add(96) as *mut __m256i, v3);
+        _mm256_storeu_si256(dest.add(n - 128) as *mut __m256i, t0);
+        _mm256_storeu_si256(dest.add(n - 96) as *mut __m256i, t1);
+        _mm256_storeu_si256(dest.add(n - 64) as *mut __m256i, t2);
+        _mm256_storeu_si256(dest.add(n - 32) as *mut __m256i, t3);
         return dest;
     }
 
-    // 3. Medium-large (257-1024): unaligned 256B blocks + sized remainder.
-    // Avoids alignment-prologue overhead in this transition zone and keeps
-    // 257/513/1025 on the same shape as nearby sizes.
+    // 257–512: one 256B block + sized remainder.
+    if n <= 512 {
+        copy_256_avx2(dest, src);
+        copy_remainder_avx2(dest.add(256), src.add(256), n - 256);
+        return dest;
+    }
+
+    // 513–1024: 256B blocks + sized remainder.
     if n <= 1024 {
         let mut d = dest;
         let mut s = src;
@@ -275,7 +356,7 @@ unsafe fn optimized_memcpy_avx2_unaligned(dest: *mut u8, src: *const u8, n: usiz
         return dest;
     }
 
-    // 4. Large path: align destination, then aligned 256B stores.
+    // n > 1024: dest-aligned main loop.
     let mut d = dest;
     let mut s = src;
     let mut rem = n;
@@ -291,25 +372,25 @@ unsafe fn optimized_memcpy_avx2_unaligned(dest: *mut u8, src: *const u8, n: usiz
     }
 
     while rem >= 256 {
-        let v0 = _mm256_loadu_si256(s as *const __m256i);
-        let v1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
-        let v2 = _mm256_loadu_si256(s.add(64) as *const __m256i);
-        let v3 = _mm256_loadu_si256(s.add(96) as *const __m256i);
-        let v4 = _mm256_loadu_si256(s.add(128) as *const __m256i);
-        let v5 = _mm256_loadu_si256(s.add(160) as *const __m256i);
-        let v6 = _mm256_loadu_si256(s.add(192) as *const __m256i);
-        let v7 = _mm256_loadu_si256(s.add(224) as *const __m256i);
+        let a0 = _mm256_loadu_si256(s as *const __m256i);
+        let a1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
+        let a2 = _mm256_loadu_si256(s.add(64) as *const __m256i);
+        let a3 = _mm256_loadu_si256(s.add(96) as *const __m256i);
+        let a4 = _mm256_loadu_si256(s.add(128) as *const __m256i);
+        let a5 = _mm256_loadu_si256(s.add(160) as *const __m256i);
+        let a6 = _mm256_loadu_si256(s.add(192) as *const __m256i);
+        let a7 = _mm256_loadu_si256(s.add(224) as *const __m256i);
 
         // SAFETY: Aligned stores require 32-byte alignment; `d` is aligned by
         // the prologue and advances in 32-byte multiples.
-        _mm256_store_si256(d as *mut __m256i, v0);
-        _mm256_store_si256(d.add(32) as *mut __m256i, v1);
-        _mm256_store_si256(d.add(64) as *mut __m256i, v2);
-        _mm256_store_si256(d.add(96) as *mut __m256i, v3);
-        _mm256_store_si256(d.add(128) as *mut __m256i, v4);
-        _mm256_store_si256(d.add(160) as *mut __m256i, v5);
-        _mm256_store_si256(d.add(192) as *mut __m256i, v6);
-        _mm256_store_si256(d.add(224) as *mut __m256i, v7);
+        _mm256_store_si256(d as *mut __m256i, a0);
+        _mm256_store_si256(d.add(32) as *mut __m256i, a1);
+        _mm256_store_si256(d.add(64) as *mut __m256i, a2);
+        _mm256_store_si256(d.add(96) as *mut __m256i, a3);
+        _mm256_store_si256(d.add(128) as *mut __m256i, a4);
+        _mm256_store_si256(d.add(160) as *mut __m256i, a5);
+        _mm256_store_si256(d.add(192) as *mut __m256i, a6);
+        _mm256_store_si256(d.add(224) as *mut __m256i, a7);
 
         d = d.add(256);
         s = s.add(256);

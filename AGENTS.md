@@ -24,6 +24,12 @@
 - The purpose of this library is to provide independent, high-performance implementations that beat glibc, not wrappers that may delegate back to glibc.
 - If intrinsics are used in limited cases, document why they cannot lower to glibc for that path and provide benchmark evidence.
 
+## `rep movsb` Is Not a Performance Strategy
+- Do not describe or recommend `rep movsb` (ERMS/FSRM) as a performant implementation strategy for this project.
+- It has already been benchmarked on the target hardware and rejected because it performs poorly relative to the explicit SIMD implementations required by this crate.
+- Do not propose retesting, adding, or dispatching to `rep movsb` unless the user explicitly asks for that investigation.
+- Prefer explicit SSE/AVX implementations and optimize their size thresholds, alignment handling, unrolling, and cache behavior using benchmark evidence.
+
 ## Project Structure & Module Organization
 - `Cargo.toml` defines crate metadata and dependencies.
 - `src/lib.rs` is the crate entry point (currently minimal) and should expose new modules via `mod`/`pub mod`.

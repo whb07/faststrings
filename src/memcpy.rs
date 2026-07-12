@@ -254,10 +254,12 @@ unsafe fn copy_remainder_avx2(d: *mut u8, s: *const u8, rem: usize) {
 // AVX PATHS
 // =============================================================================
 
-// Fixed 16 MiB NT was a sharp cliff on reused destinations (hot-buffer benches).
-// Keep cached stores until well past typical LLC / working-set sizes; revisit
-// with LLC-derived thresholds for true streaming workloads.
-const NT_THRESHOLD: usize = 64 * 1024 * 1024;
+// Switch to non-temporal stores once a single copy would thrash a typical
+// post-2020 L3 *slice* (Zen 2/3 CCD ≈ 16–32 MiB shared by 4–8 cores).
+// On this class of CPU (e.g. 5950X: 2×32 MiB L3), ~3/4 of one CCD's L3
+// (~24 MiB) is the streaming crossover; below that, cached stores win for
+// hot reused destinations. Compile-time constant — no runtime LLC probe.
+const NT_THRESHOLD: usize = 24 * 1024 * 1024;
 
 /// Branch-free 128B AVX2 leaf (4×YMM load-all / store-all).
 #[target_feature(enable = "avx2")]
@@ -556,28 +558,43 @@ unsafe fn optimized_memcpy_avx2_nt(dest: *mut u8, src: *const u8, n: usize) -> *
         rem -= advance;
     }
 
-    // Main loop: non-temporal stores (bypass cache)
-    while rem >= 128 {
+    // Main loop: non-temporal stores (bypass cache) + source prefetch.
+    // 256B/iter matches the cached large path so we stay bandwidth-limited.
+    while rem >= 256 {
+        // Prefetch source ahead; dest is intentionally not cached (NT).
+        _mm_prefetch(s.add(768) as *const i8, _MM_HINT_T0);
+        _mm_prefetch(s.add(832) as *const i8, _MM_HINT_T0);
+        _mm_prefetch(s.add(896) as *const i8, _MM_HINT_T0);
+        _mm_prefetch(s.add(960) as *const i8, _MM_HINT_T0);
+
         // SAFETY: Unaligned loads are valid for any alignment; caller guarantees
         // `src` is readable for the loop span.
-        let v0 = _mm256_loadu_si256(s as *const __m256i);
-        let v1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
-        let v2 = _mm256_loadu_si256(s.add(64) as *const __m256i);
-        let v3 = _mm256_loadu_si256(s.add(96) as *const __m256i);
+        let a0 = _mm256_loadu_si256(s as *const __m256i);
+        let a1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
+        let a2 = _mm256_loadu_si256(s.add(64) as *const __m256i);
+        let a3 = _mm256_loadu_si256(s.add(96) as *const __m256i);
+        let a4 = _mm256_loadu_si256(s.add(128) as *const __m256i);
+        let a5 = _mm256_loadu_si256(s.add(160) as *const __m256i);
+        let a6 = _mm256_loadu_si256(s.add(192) as *const __m256i);
+        let a7 = _mm256_loadu_si256(s.add(224) as *const __m256i);
 
         // SAFETY: Non-temporal stores require 32-byte alignment; `d` is aligned
         // by the prologue and advances in 32-byte multiples.
-        _mm256_stream_si256(d as *mut __m256i, v0);
-        _mm256_stream_si256(d.add(32) as *mut __m256i, v1);
-        _mm256_stream_si256(d.add(64) as *mut __m256i, v2);
-        _mm256_stream_si256(d.add(96) as *mut __m256i, v3);
+        _mm256_stream_si256(d as *mut __m256i, a0);
+        _mm256_stream_si256(d.add(32) as *mut __m256i, a1);
+        _mm256_stream_si256(d.add(64) as *mut __m256i, a2);
+        _mm256_stream_si256(d.add(96) as *mut __m256i, a3);
+        _mm256_stream_si256(d.add(128) as *mut __m256i, a4);
+        _mm256_stream_si256(d.add(160) as *mut __m256i, a5);
+        _mm256_stream_si256(d.add(192) as *mut __m256i, a6);
+        _mm256_stream_si256(d.add(224) as *mut __m256i, a7);
 
-        d = d.add(128);
-        s = s.add(128);
-        rem -= 128;
+        d = d.add(256);
+        s = s.add(256);
+        rem -= 256;
     }
 
-    // Tail with regular stores; rem < 128 and prologue already wrote >= 32 when
+    // Tail with regular stores; rem < 256 and prologue already wrote >= 32 when
     // rem < 32 after the loop (or rem == 0).
     if rem > 0 {
         if rem < 32 {

@@ -8,7 +8,8 @@ use core::arch::x86_64::*;
 /// Dispatch (AVX2 baseline):
 /// - `0..32`: GPR / SSE overlapping ladder (avoids AVX entry on tiny copies)
 /// - `32..128`: AVX2 overlapping YMM (matches glibc VEC=32 size classes)
-/// - exact `128` / `256`: branch-free AVX2 leaves
+/// - exact `128` / `256` / `512` / `1024`: branch-free leaves, checked inside
+///   their size band so neighbors do not pay unrelated peels
 /// - otherwise medium, then NT above [`NT_THRESHOLD`]
 ///
 /// # Safety
@@ -18,25 +19,38 @@ use core::arch::x86_64::*;
 /// - AVX2 must be supported if the AVX2 path is taken
 #[inline(always)]
 pub unsafe fn optimized_memcpy_unified(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
-    // Small sizes first so 1–127 never pay the exact-128/256 compares.
+    // Size-class dispatch into narrow leaves so each band only pays its own
+    // compares and does not jump into a mega-medium dispatcher.
     if n < 32 {
         return optimized_memcpy_sse_tiny(dest, src, n);
     }
     if n < 128 {
         return optimized_memcpy_avx2_small(dest, src, n);
     }
-
-    // Exact 128/256: jump straight into a branch-free AVX leaf. Avoids the
-    // medium dispatcher hop that showed up as `jmp *rel` in the ABI-fair bench.
-    if n == 128 {
-        return optimized_memcpy_avx2_exact_128(dest, src);
+    if n < 256 {
+        if n == 128 {
+            return optimized_memcpy_avx2_exact_128(dest, src);
+        }
+        return optimized_memcpy_avx2_overlap_129_255(dest, src, n);
     }
-    if n == 256 {
-        return optimized_memcpy_avx2_exact_256(dest, src);
+    if n < 512 {
+        if n == 256 {
+            return optimized_memcpy_avx2_exact_256(dest, src);
+        }
+        return optimized_memcpy_avx2_blocks_257_511(dest, src, n);
+    }
+    if n < 1024 {
+        if n == 512 {
+            return optimized_memcpy_avx2_exact_512(dest, src);
+        }
+        return optimized_memcpy_avx2_blocks_513_1023(dest, src, n);
+    }
+    if n == 1024 {
+        return optimized_memcpy_avx2_exact_1024(dest, src);
     }
 
     if n < NT_THRESHOLD {
-        optimized_memcpy_avx2_medium(dest, src, n)
+        optimized_memcpy_avx2_large(dest, src, n)
     } else {
         optimized_memcpy_avx2_nt(dest, src, n)
     }
@@ -225,8 +239,15 @@ unsafe fn copy_remainder_avx2(d: *mut u8, s: *const u8, rem: usize) {
         return;
     }
 
-    copy_128_avx2(d, s);
-    copy_128_avx2(d.add(rem - 128), s.add(rem - 128));
+    if rem < 256 {
+        // 193-255: overlapping 128B head/tail.
+        copy_128_avx2(d, s);
+        copy_128_avx2(d.add(rem - 128), s.add(rem - 128));
+        return;
+    }
+
+    // rem == 256
+    copy_256_avx2(d, s);
 }
 
 // =============================================================================
@@ -276,18 +297,67 @@ unsafe fn optimized_memcpy_avx2_exact_256(dest: *mut u8, src: *const u8) -> *mut
     dest
 }
 
-/// Flattened medium/large AVX2 leaf (n > 128, n != 256, n < NT_THRESHOLD).
-///
-/// Exact 128/256 are handled by dedicated leaves from the unified entry.
-/// Neighbors use overlapping head/tail. Always `loadu`/`storeu`.
+/// Branch-free 512B AVX2 leaf: two sequential 256B blocks (register-reuse).
 #[target_feature(enable = "avx2")]
-unsafe fn optimized_memcpy_avx2_medium(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+unsafe fn optimized_memcpy_avx2_exact_512(dest: *mut u8, src: *const u8) -> *mut u8 {
+    // Inline both blocks (no helper calls) — same shape as exact_256, twice.
+    let a0 = _mm256_loadu_si256(src as *const __m256i);
+    let a1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
+    let a2 = _mm256_loadu_si256(src.add(64) as *const __m256i);
+    let a3 = _mm256_loadu_si256(src.add(96) as *const __m256i);
+    let a4 = _mm256_loadu_si256(src.add(128) as *const __m256i);
+    let a5 = _mm256_loadu_si256(src.add(160) as *const __m256i);
+    let a6 = _mm256_loadu_si256(src.add(192) as *const __m256i);
+    let a7 = _mm256_loadu_si256(src.add(224) as *const __m256i);
+    _mm256_storeu_si256(dest as *mut __m256i, a0);
+    _mm256_storeu_si256(dest.add(32) as *mut __m256i, a1);
+    _mm256_storeu_si256(dest.add(64) as *mut __m256i, a2);
+    _mm256_storeu_si256(dest.add(96) as *mut __m256i, a3);
+    _mm256_storeu_si256(dest.add(128) as *mut __m256i, a4);
+    _mm256_storeu_si256(dest.add(160) as *mut __m256i, a5);
+    _mm256_storeu_si256(dest.add(192) as *mut __m256i, a6);
+    _mm256_storeu_si256(dest.add(224) as *mut __m256i, a7);
+
+    let b0 = _mm256_loadu_si256(src.add(256) as *const __m256i);
+    let b1 = _mm256_loadu_si256(src.add(288) as *const __m256i);
+    let b2 = _mm256_loadu_si256(src.add(320) as *const __m256i);
+    let b3 = _mm256_loadu_si256(src.add(352) as *const __m256i);
+    let b4 = _mm256_loadu_si256(src.add(384) as *const __m256i);
+    let b5 = _mm256_loadu_si256(src.add(416) as *const __m256i);
+    let b6 = _mm256_loadu_si256(src.add(448) as *const __m256i);
+    let b7 = _mm256_loadu_si256(src.add(480) as *const __m256i);
+    _mm256_storeu_si256(dest.add(256) as *mut __m256i, b0);
+    _mm256_storeu_si256(dest.add(288) as *mut __m256i, b1);
+    _mm256_storeu_si256(dest.add(320) as *mut __m256i, b2);
+    _mm256_storeu_si256(dest.add(352) as *mut __m256i, b3);
+    _mm256_storeu_si256(dest.add(384) as *mut __m256i, b4);
+    _mm256_storeu_si256(dest.add(416) as *mut __m256i, b5);
+    _mm256_storeu_si256(dest.add(448) as *mut __m256i, b6);
+    _mm256_storeu_si256(dest.add(480) as *mut __m256i, b7);
+    dest
+}
+
+/// Branch-free 1024B AVX2 leaf: four sequential 256B blocks.
+#[target_feature(enable = "avx2")]
+unsafe fn optimized_memcpy_avx2_exact_1024(dest: *mut u8, src: *const u8) -> *mut u8 {
+    copy_256_avx2(dest, src);
+    copy_256_avx2(dest.add(256), src.add(256));
+    copy_256_avx2(dest.add(512), src.add(512));
+    copy_256_avx2(dest.add(768), src.add(768));
+    dest
+}
+
+/// Overlapping AVX2 copy for `129 <= n <= 255`.
+#[target_feature(enable = "avx2")]
+unsafe fn optimized_memcpy_avx2_overlap_129_255(
+    dest: *mut u8,
+    src: *const u8,
+    n: usize,
+) -> *mut u8 {
     // SAFETY: Unaligned AVX loads/stores are valid for any alignment; caller
     // guarantees `src`/`dest` are valid for `n` bytes and non-overlapping.
-    // Entrant sizes are in 129..=255 or >= 257 (exact 128/256 peeled upstream).
-
-    // 129–192: 128B head + 64B overlapping tail (6×YMM, not 8).
     if n <= 192 {
+        // 129–192: 128B head + 64B overlapping tail (6×YMM, not 8).
         let v0 = _mm256_loadu_si256(src as *const __m256i);
         let v1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
         let v2 = _mm256_loadu_si256(src.add(64) as *const __m256i);
@@ -304,38 +374,78 @@ unsafe fn optimized_memcpy_avx2_medium(dest: *mut u8, src: *const u8, n: usize) 
     }
 
     // 193–255: 128B head + 128B overlapping tail.
-    if n < 256 {
-        let v0 = _mm256_loadu_si256(src as *const __m256i);
-        let v1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
-        let v2 = _mm256_loadu_si256(src.add(64) as *const __m256i);
-        let v3 = _mm256_loadu_si256(src.add(96) as *const __m256i);
-        let t0 = _mm256_loadu_si256(src.add(n - 128) as *const __m256i);
-        let t1 = _mm256_loadu_si256(src.add(n - 96) as *const __m256i);
-        let t2 = _mm256_loadu_si256(src.add(n - 64) as *const __m256i);
-        let t3 = _mm256_loadu_si256(src.add(n - 32) as *const __m256i);
-        _mm256_storeu_si256(dest as *mut __m256i, v0);
-        _mm256_storeu_si256(dest.add(32) as *mut __m256i, v1);
-        _mm256_storeu_si256(dest.add(64) as *mut __m256i, v2);
-        _mm256_storeu_si256(dest.add(96) as *mut __m256i, v3);
-        _mm256_storeu_si256(dest.add(n - 128) as *mut __m256i, t0);
-        _mm256_storeu_si256(dest.add(n - 96) as *mut __m256i, t1);
-        _mm256_storeu_si256(dest.add(n - 64) as *mut __m256i, t2);
-        _mm256_storeu_si256(dest.add(n - 32) as *mut __m256i, t3);
-        return dest;
-    }
+    let v0 = _mm256_loadu_si256(src as *const __m256i);
+    let v1 = _mm256_loadu_si256(src.add(32) as *const __m256i);
+    let v2 = _mm256_loadu_si256(src.add(64) as *const __m256i);
+    let v3 = _mm256_loadu_si256(src.add(96) as *const __m256i);
+    let t0 = _mm256_loadu_si256(src.add(n - 128) as *const __m256i);
+    let t1 = _mm256_loadu_si256(src.add(n - 96) as *const __m256i);
+    let t2 = _mm256_loadu_si256(src.add(n - 64) as *const __m256i);
+    let t3 = _mm256_loadu_si256(src.add(n - 32) as *const __m256i);
+    _mm256_storeu_si256(dest as *mut __m256i, v0);
+    _mm256_storeu_si256(dest.add(32) as *mut __m256i, v1);
+    _mm256_storeu_si256(dest.add(64) as *mut __m256i, v2);
+    _mm256_storeu_si256(dest.add(96) as *mut __m256i, v3);
+    _mm256_storeu_si256(dest.add(n - 128) as *mut __m256i, t0);
+    _mm256_storeu_si256(dest.add(n - 96) as *mut __m256i, t1);
+    _mm256_storeu_si256(dest.add(n - 64) as *mut __m256i, t2);
+    _mm256_storeu_si256(dest.add(n - 32) as *mut __m256i, t3);
+    dest
+}
 
-    // 257–512: one 256B block + sized remainder.
-    if n <= 512 {
+/// `257 <= n <= 511`: one 256B block + sized remainder; upper band overlaps.
+#[target_feature(enable = "avx2")]
+unsafe fn optimized_memcpy_avx2_blocks_257_511(
+    dest: *mut u8,
+    src: *const u8,
+    n: usize,
+) -> *mut u8 {
+    // SAFETY: caller guarantees valid non-overlapping `n` bytes; remainder may
+    // overlap into the 256B head for rem < 32.
+    if n <= 384 {
         copy_256_avx2(dest, src);
         copy_remainder_avx2(dest.add(256), src.add(256), n - 256);
         return dest;
     }
 
-    // 513–1024: 256B blocks + sized remainder.
-    if n <= 1024 {
-        let mut d = dest;
-        let mut s = src;
-        let mut rem = n;
+    // 385–511: overlapping 256B head/tail (same traffic as exact 512).
+    copy_256_avx2(dest, src);
+    copy_256_avx2(dest.add(n - 256), src.add(n - 256));
+    dest
+}
+
+/// `513 <= n <= 1023`: straight 256B blocks + sized remainder (no while).
+#[target_feature(enable = "avx2")]
+unsafe fn optimized_memcpy_avx2_blocks_513_1023(
+    dest: *mut u8,
+    src: *const u8,
+    n: usize,
+) -> *mut u8 {
+    // SAFETY: caller guarantees valid non-overlapping `n` bytes.
+    copy_256_avx2(dest, src);
+    copy_256_avx2(dest.add(256), src.add(256));
+    if n <= 768 {
+        copy_remainder_avx2(dest.add(512), src.add(512), n - 512);
+        return dest;
+    }
+
+    // 769–1023: third block + remainder (exact 1024 peeled upstream).
+    copy_256_avx2(dest.add(512), src.add(512));
+    copy_remainder_avx2(dest.add(768), src.add(768), n - 768);
+    dest
+}
+
+/// `n >= 1025`, below NT: dest-aligned main loop + sized remainder.
+#[target_feature(enable = "avx2")]
+unsafe fn optimized_memcpy_avx2_large(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    // SAFETY: Unaligned AVX loads/stores are valid for any alignment; caller
+    // guarantees `src`/`dest` are valid for `n` bytes and non-overlapping.
+    let mut d = dest;
+    let mut s = src;
+    let mut rem = n;
+
+    // Keep 1025–1280 off the align prologue: four unaligned blocks + rem.
+    if n <= 1280 {
         while rem >= 256 {
             copy_256_avx2(d, s);
             d = d.add(256);
@@ -345,11 +455,6 @@ unsafe fn optimized_memcpy_avx2_medium(dest: *mut u8, src: *const u8, n: usize) 
         copy_remainder_avx2(d, s, rem);
         return dest;
     }
-
-    // n > 1024: dest-aligned main loop.
-    let mut d = dest;
-    let mut s = src;
-    let mut rem = n;
 
     let misalign = (d as usize) & 31;
     if misalign != 0 {

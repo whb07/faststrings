@@ -1,5 +1,5 @@
 use core::ffi::c_char;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use faststrings::str::{strcmp as fast_strcmp, strncmp as fast_strncmp};
 use std::time::Duration;
 

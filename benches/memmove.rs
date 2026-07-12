@@ -1,124 +1,215 @@
 use core::ffi::c_void;
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use faststrings::memmove::optimized_memmove_unified;
-use std::time::Duration;
+
+#[path = "bench_support.rs"]
+mod support;
+use support::AlignedBuffer;
 
 unsafe extern "C" {
     #[link_name = "memmove"]
     fn libc_memmove(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
 }
 
-#[derive(Copy, Clone)]
-enum CaseKind {
-    NonOverlap,
-    OverlapForward,
-    OverlapBackward,
+#[derive(Clone, Copy)]
+enum Implementation {
+    Glibc,
+    Faststrings,
+}
+#[derive(Clone, Copy)]
+enum Direction {
+    Forward,
+    Backward,
 }
 
-#[derive(Clone)]
-struct MoveCase {
-    label: String,
-    len: usize,
-    kind: CaseKind,
-    delta: usize,
+#[inline(always)]
+unsafe fn move_bytes(implementation: Implementation, dst: *mut u8, src: *const u8, len: usize) {
+    match implementation {
+        Implementation::Glibc => unsafe {
+            libc_memmove(dst.cast(), src.cast(), len);
+        },
+        Implementation::Faststrings => unsafe {
+            optimized_memmove_unified(dst, src, len);
+        },
+    }
+    black_box(unsafe { core::ptr::read_volatile(dst) });
 }
 
-fn configure_group_for_len(
+fn bench_pair(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    label: &str,
     len: usize,
+    dst: *mut u8,
+    src: *const u8,
 ) {
-    if len >= 1 << 20 {
-        group.sample_size(20);
-        group.warm_up_time(Duration::from_millis(300));
-        group.measurement_time(Duration::from_millis(900));
-    } else if len >= 1 << 16 {
-        group.sample_size(30);
-        group.warm_up_time(Duration::from_millis(250));
-        group.measurement_time(Duration::from_millis(700));
-    } else {
-        group.sample_size(40);
-        group.warm_up_time(Duration::from_millis(200));
-        group.measurement_time(Duration::from_millis(500));
+    group.throughput(Throughput::Bytes(len as u64));
+    for (name, implementation) in [
+        ("glibc", Implementation::Glibc),
+        ("faststrings", Implementation::Faststrings),
+    ] {
+        group.bench_function(BenchmarkId::new(name, label), |b| {
+            b.iter(|| unsafe {
+                move_bytes(
+                    implementation,
+                    black_box(dst),
+                    black_box(src),
+                    black_box(len),
+                );
+            })
+        });
     }
 }
 
-fn memmove_benches(c: &mut Criterion) {
-    let mut cases = Vec::new();
-
-    let sizes = [
-        1usize, 2, 3, 4, 7, 8, 15, 16, 31, 32, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512,
-        513, 1023, 1024, 4096, 65536, 262144,
-    ];
-
-    for len in sizes {
-        cases.push(MoveCase {
-            label: format!("nonoverlap_size_{len}"),
-            len,
-            kind: CaseKind::NonOverlap,
-            delta: 17,
-        });
-
-        for delta in [1usize, 15, 31] {
-            cases.push(MoveCase {
-                label: format!("overlap_fwd_size_{len}_d{delta}"),
-                len,
-                kind: CaseKind::OverlapForward,
-                delta,
-            });
-            cases.push(MoveCase {
-                label: format!("overlap_bwd_size_{len}_d{delta}"),
-                len,
-                kind: CaseKind::OverlapBackward,
-                delta,
-            });
-        }
-    }
-
-    let mut group = c.benchmark_group("memmove");
-
-    for case in &cases {
-        let len = case.len;
-        let alloc_len = (len * 3) + 128;
-        let mut buf = vec![0u8; alloc_len];
-        for (i, byte) in buf.iter_mut().enumerate() {
-            *byte = (i % 251) as u8;
-        }
-
-        let base = unsafe { buf.as_mut_ptr().add(32) };
-        let (src_ptr, dst_ptr) = match case.kind {
-            CaseKind::NonOverlap => unsafe { (base, base.add(len + case.delta)) },
-            CaseKind::OverlapForward => unsafe { (base.add(case.delta), base) },
-            CaseKind::OverlapBackward => unsafe { (base, base.add(case.delta)) },
-        };
-
-        configure_group_for_len(&mut group, len);
-        group.throughput(Throughput::Bytes(len as u64));
-
-        group.bench_with_input(BenchmarkId::new("glibc", &case.label), &len, |b, &n| {
-            b.iter(|| unsafe {
-                libc_memmove(
-                    black_box(dst_ptr as *mut c_void),
-                    black_box(src_ptr as *const c_void),
-                    black_box(n),
-                );
-                black_box(core::ptr::read_volatile(dst_ptr));
-            });
-        });
-
-        group.bench_with_input(
-            BenchmarkId::new("faststrings", &case.label),
-            &len,
-            |b, &n| {
-                b.iter(|| unsafe {
-                    optimized_memmove_unified(black_box(dst_ptr), black_box(src_ptr), black_box(n));
-                    black_box(core::ptr::read_volatile(dst_ptr));
-                });
-            },
-        );
-    }
-
+fn overlap_case(
+    c: &mut Criterion,
+    group_name: &str,
+    label: &str,
+    len: usize,
+    delta: usize,
+    direction: Direction,
+    base_off: usize,
+) {
+    let mut group = c.benchmark_group(group_name);
+    let mut buf = AlignedBuffer::new(len + delta + base_off + 4096, 4096);
+    let base = buf.mut_ptr(base_off);
+    let (src, dst) = match direction {
+        Direction::Forward => (unsafe { base.add(delta) } as *const u8, base),
+        Direction::Backward => (base as *const u8, unsafe { base.add(delta) }),
+    };
+    bench_pair(&mut group, label, len, dst, src);
+    black_box(&mut buf);
     group.finish();
 }
 
-criterion_group!(benches, memmove_benches);
+fn basic_and_large_benches(c: &mut Criterion) {
+    for &len in &[
+        1usize,
+        16,
+        31,
+        32,
+        63,
+        64,
+        65,
+        256,
+        1024,
+        4096,
+        256 * 1024,
+        256 * 1024 + 1,
+        1024 * 1024,
+        2 * 1024 * 1024,
+    ] {
+        let delta = if len == 1 { 0 } else { 1 };
+        overlap_case(
+            c,
+            "memmove_overlap_sizes",
+            &format!("forward_len{len}_d{delta}"),
+            len,
+            delta,
+            Direction::Forward,
+            0,
+        );
+        overlap_case(
+            c,
+            "memmove_overlap_sizes",
+            &format!("backward_len{len}_d{delta}"),
+            len,
+            delta,
+            Direction::Backward,
+            0,
+        );
+    }
+}
+
+fn overlap_delta_benches(c: &mut Criterion) {
+    // Vector-width boundaries plus the small/large overlap cliffs.
+    for &len in &[256usize, 4096, 256 * 1024, 1024 * 1024 + 1] {
+        let candidates = [
+            1usize,
+            15,
+            16,
+            17,
+            31,
+            32,
+            33,
+            63,
+            64,
+            65,
+            127,
+            128,
+            129,
+            255,
+            256,
+            257,
+            len - 1,
+        ];
+        for &delta in &candidates {
+            if delta >= len {
+                continue;
+            }
+            for &(direction, tag) in &[(Direction::Forward, "fwd"), (Direction::Backward, "bwd")] {
+                overlap_case(
+                    c,
+                    "memmove_overlap_deltas",
+                    &format!("{tag}_len{len}_d{delta}"),
+                    len,
+                    delta,
+                    direction,
+                    0,
+                );
+            }
+        }
+    }
+}
+
+fn same_pointer_benches(c: &mut Criterion) {
+    let mut group = c.benchmark_group("memmove_same_pointer");
+    for &len in &[0usize, 1, 64, 4096, 1024 * 1024] {
+        let mut buf = AlignedBuffer::new(len + 64, 64);
+        let ptr = buf.mut_ptr(0);
+        bench_pair(&mut group, &format!("size_{len}"), len, ptr, ptr);
+        black_box(&mut buf);
+    }
+    group.finish();
+}
+
+fn alignment_benches(c: &mut Criterion) {
+    // Non-overlap permits source and destination alignment to vary independently.
+    for &len in &[64usize, 257, 4096, 256 * 1024] {
+        for &(src_off, dst_off) in &[(0usize, 0usize), (0, 1), (1, 0), (7, 31), (31, 7), (63, 32)] {
+            let mut group = c.benchmark_group("memmove_nonoverlap_alignment");
+            let mut src = AlignedBuffer::new(len + 64, 64);
+            let mut dst = AlignedBuffer::new(len + 64, 64);
+            bench_pair(
+                &mut group,
+                &format!("len{len}_s{src_off}_d{dst_off}"),
+                len,
+                dst.mut_ptr(dst_off),
+                src.ptr(src_off),
+            );
+            black_box((&mut src, &mut dst));
+            group.finish();
+        }
+    }
+
+    // For overlap, delta constrains relative alignment; vary the absolute source alignment.
+    for &(base_off, delta) in &[(0usize, 1usize), (1, 31), (7, 32), (31, 33), (63, 65)] {
+        overlap_case(
+            c,
+            "memmove_overlap_alignment",
+            &format!("len4096_base{base_off}_d{delta}"),
+            4096,
+            delta,
+            Direction::Backward,
+            base_off,
+        );
+    }
+}
+
+criterion_group!(
+    benches,
+    basic_and_large_benches,
+    overlap_delta_benches,
+    same_pointer_benches,
+    alignment_benches
+);
 criterion_main!(benches);

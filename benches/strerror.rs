@@ -1,5 +1,5 @@
 use core::ffi::{c_char, c_int};
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use faststrings::strerror::strerror as fast_strerror;
 use faststrings::strerror_r::strerror_r as fast_strerror_r;
 use std::time::Duration;
@@ -60,13 +60,17 @@ fn strerror_benches(c: &mut Criterion) {
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("faststrings", label), &errnum, |b, &err| {
-            b.iter(|| {
-                let msg = fast_strerror(black_box(err));
-                black_box(msg.len());
-                black_box(unsafe { core::ptr::read_volatile(msg.as_ptr()) });
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("faststrings", label),
+            &errnum,
+            |b, &err| {
+                b.iter(|| {
+                    let msg = fast_strerror(black_box(err));
+                    black_box(msg.len());
+                    black_box(unsafe { core::ptr::read_volatile(msg.as_ptr()) });
+                });
+            },
+        );
     }
 
     group.finish();
@@ -87,18 +91,22 @@ fn strerror_r_benches(c: &mut Criterion) {
     for (label, errnum, buflen) in cases {
         configure_group(&mut group, buflen);
 
-        group.bench_with_input(BenchmarkId::new("glibc", label), &(errnum, buflen), |b, &(err, n)| {
-            b.iter(|| unsafe {
-                let mut buf = [0u8; 128];
-                let rc = libc_posix_strerror_r(
-                    black_box(err),
-                    black_box(buf.as_mut_ptr() as *mut c_char),
-                    black_box(n),
-                );
-                black_box(rc);
-                black_box(core::ptr::read_volatile(buf.as_ptr()));
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("glibc", label),
+            &(errnum, buflen),
+            |b, &(err, n)| {
+                b.iter(|| unsafe {
+                    let mut buf = [0u8; 128];
+                    let rc = libc_posix_strerror_r(
+                        black_box(err),
+                        black_box(buf.as_mut_ptr() as *mut c_char),
+                        black_box(n),
+                    );
+                    black_box(rc);
+                    black_box(core::ptr::read_volatile(buf.as_ptr()));
+                });
+            },
+        );
 
         group.bench_with_input(
             BenchmarkId::new("faststrings", label),

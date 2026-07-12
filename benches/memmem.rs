@@ -1,5 +1,5 @@
 use core::ffi::c_void;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use faststrings::mem::memmem as fast_memmem;
 use std::time::Duration;
 

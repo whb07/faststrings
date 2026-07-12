@@ -1,9 +1,9 @@
 use core::ffi::c_char;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use faststrings::stpncpy::stpncpy as fast_stpncpy;
 use faststrings::str::{
-    strcat as fast_strcat, strcpy as fast_strcpy, strlcat as fast_strlcat, strlcpy as fast_strlcpy,
-    strncat as fast_strncat, stpcpy as fast_stpcpy, strncpy as fast_strncpy,
+    stpcpy as fast_stpcpy, strcat as fast_strcat, strcpy as fast_strcpy, strlcat as fast_strlcat,
+    strlcpy as fast_strlcpy, strncat as fast_strncat, strncpy as fast_strncpy,
 };
 use faststrings::strxfrm::strxfrm as fast_strxfrm;
 use std::time::Duration;
@@ -137,7 +137,11 @@ fn strncpy_benches(c: &mut Criterion) {
             group.bench_with_input(BenchmarkId::new("faststrings", &label), &n, |b, &n| {
                 b.iter(|| {
                     dst.copy_from_slice(&template);
-                    black_box(fast_strncpy(black_box(&mut dst), black_box(&src), black_box(n)));
+                    black_box(fast_strncpy(
+                        black_box(&mut dst),
+                        black_box(&src),
+                        black_box(n),
+                    ));
                     black_box(unsafe { core::ptr::read_volatile(dst.as_ptr()) });
                 });
             });
@@ -218,7 +222,11 @@ fn stpncpy_benches(c: &mut Criterion) {
             group.bench_with_input(BenchmarkId::new("faststrings", &label), &n, |b, &n| {
                 b.iter(|| {
                     dst.copy_from_slice(&template);
-                    black_box(fast_stpncpy(black_box(&mut dst), black_box(&src), black_box(n)));
+                    black_box(fast_stpncpy(
+                        black_box(&mut dst),
+                        black_box(&src),
+                        black_box(n),
+                    ));
                     black_box(unsafe { core::ptr::read_volatile(dst.as_ptr()) });
                 });
             });
@@ -301,7 +309,11 @@ fn strncat_benches(c: &mut Criterion) {
             group.bench_with_input(BenchmarkId::new("faststrings", &label), &n, |b, &n| {
                 b.iter(|| {
                     dst.copy_from_slice(&template);
-                    black_box(fast_strncat(black_box(&mut dst), black_box(&src), black_box(n)));
+                    black_box(fast_strncat(
+                        black_box(&mut dst),
+                        black_box(&src),
+                        black_box(n),
+                    ));
                     black_box(unsafe { core::ptr::read_volatile(dst.as_ptr()) });
                 });
             });

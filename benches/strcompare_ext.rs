@@ -1,5 +1,5 @@
 use core::ffi::c_char;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use faststrings::str::{
     strcasecmp as fast_strcasecmp, strcoll as fast_strcoll, strncasecmp as fast_strncasecmp,
     strverscmp as fast_strverscmp,
@@ -397,7 +397,11 @@ fn strncasecmp_benches(c: &mut Criterion) {
             &(case.len, n),
             |b, &(_, n)| {
                 b.iter(|| {
-                    black_box(fast_strncasecmp(black_box(&lhs), black_box(&rhs), black_box(n)));
+                    black_box(fast_strncasecmp(
+                        black_box(&lhs),
+                        black_box(&rhs),
+                        black_box(n),
+                    ));
                 });
             },
         );

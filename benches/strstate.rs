@@ -1,5 +1,5 @@
 use core::ffi::{c_char, c_void};
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use faststrings::strdup::strdup as fast_strdup;
 use faststrings::strndup::strndup as fast_strndup;
 use faststrings::strtok::strtok as fast_strtok;
@@ -14,7 +14,11 @@ unsafe extern "C" {
     #[link_name = "strtok"]
     fn libc_strtok(s: *mut c_char, delim: *const c_char) -> *mut c_char;
     #[link_name = "strtok_r"]
-    fn libc_strtok_r(s: *mut c_char, delim: *const c_char, saveptr: *mut *mut c_char) -> *mut c_char;
+    fn libc_strtok_r(
+        s: *mut c_char,
+        delim: *const c_char,
+        saveptr: *mut *mut c_char,
+    ) -> *mut c_char;
     #[link_name = "free"]
     fn libc_free(p: *mut c_void);
 }
@@ -50,7 +54,11 @@ fn make_c_string(len: usize) -> Vec<u8> {
 fn make_token_input(len: usize) -> Vec<u8> {
     let mut out = vec![0u8; len + 1];
     for i in 0..len {
-        out[i] = if i % 8 == 7 { b',' } else { b'a' + (i % 13) as u8 };
+        out[i] = if i % 8 == 7 {
+            b','
+        } else {
+            b'a' + (i % 13) as u8
+        };
     }
     out[len] = 0;
     out
@@ -102,10 +110,7 @@ fn strndup_benches(c: &mut Criterion) {
 
             group.bench_with_input(BenchmarkId::new("glibc", &label), &n, |b, &n| {
                 b.iter(|| unsafe {
-                    let ptr = libc_strndup(
-                        black_box(src.as_ptr() as *const c_char),
-                        black_box(n),
-                    );
+                    let ptr = libc_strndup(black_box(src.as_ptr() as *const c_char), black_box(n));
                     if !ptr.is_null() {
                         black_box(core::ptr::read_volatile(ptr as *const u8));
                         libc_free(ptr as *mut c_void);
@@ -148,7 +153,10 @@ fn strtok_benches(c: &mut Criterion) {
                 );
                 while !tok.is_null() {
                     count += 1;
-                    tok = libc_strtok(core::ptr::null_mut(), black_box(delim.as_ptr() as *const c_char));
+                    tok = libc_strtok(
+                        core::ptr::null_mut(),
+                        black_box(delim.as_ptr() as *const c_char),
+                    );
                 }
                 black_box(count);
                 black_box(core::ptr::read_volatile(work.as_ptr()));
@@ -159,7 +167,9 @@ fn strtok_benches(c: &mut Criterion) {
             b.iter(|| {
                 let mut state = 0usize;
                 let mut count = 0usize;
-                while let Some(tok) = fast_strtok(black_box(&template), black_box(&delim), &mut state) {
+                while let Some(tok) =
+                    fast_strtok(black_box(&template), black_box(&delim), &mut state)
+                {
                     black_box(tok.len());
                     count += 1;
                 }

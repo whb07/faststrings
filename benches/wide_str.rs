@@ -1,18 +1,17 @@
 use core::ffi::c_void;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use faststrings::types::wchar_t;
-use faststrings::wcstok::wcstok as fast_wcstok;
 use faststrings::wcsdup::wcsdup as fast_wcsdup;
+use faststrings::wcstok::wcstok as fast_wcstok;
 use faststrings::wcsxfrm::wcsxfrm as fast_wcsxfrm;
 use faststrings::wide::{
     wcpcpy as fast_wcpcpy, wcpncpy as fast_wcpncpy, wcscasecmp as fast_wcscasecmp,
     wcscat as fast_wcscat, wcschr as fast_wcschr, wcschrnul as fast_wcschrnul,
-    wcscmp as fast_wcscmp, wcscoll as fast_wcscoll, wcscpy as fast_wcscpy,
-    wcscspn as fast_wcscspn, wcslen as fast_wcslen, wcslcat as fast_wcslcat,
-    wcslcpy as fast_wcslcpy, wcsncasecmp as fast_wcsncasecmp, wcsncat as fast_wcsncat,
-    wcsncmp as fast_wcsncmp, wcsncpy as fast_wcsncpy, wcsnlen as fast_wcsnlen,
-    wcspbrk as fast_wcspbrk, wcsrchr as fast_wcsrchr, wcsspn as fast_wcsspn,
-    wcsstr as fast_wcsstr,
+    wcscmp as fast_wcscmp, wcscoll as fast_wcscoll, wcscpy as fast_wcscpy, wcscspn as fast_wcscspn,
+    wcslcat as fast_wcslcat, wcslcpy as fast_wcslcpy, wcslen as fast_wcslen,
+    wcsncasecmp as fast_wcsncasecmp, wcsncat as fast_wcsncat, wcsncmp as fast_wcsncmp,
+    wcsncpy as fast_wcsncpy, wcsnlen as fast_wcsnlen, wcspbrk as fast_wcspbrk,
+    wcsrchr as fast_wcsrchr, wcsspn as fast_wcsspn, wcsstr as fast_wcsstr,
 };
 use std::time::Duration;
 
@@ -62,8 +61,11 @@ unsafe extern "C" {
     #[link_name = "wcslcat"]
     fn libc_wcslcat(dest: *mut wchar_t, src: *const wchar_t, size: usize) -> usize;
     #[link_name = "wcstok"]
-    fn libc_wcstok(s: *mut wchar_t, delim: *const wchar_t, saveptr: *mut *mut wchar_t)
-    -> *mut wchar_t;
+    fn libc_wcstok(
+        s: *mut wchar_t,
+        delim: *const wchar_t,
+        saveptr: *mut *mut wchar_t,
+    ) -> *mut wchar_t;
     #[link_name = "wcsxfrm"]
     fn libc_wcsxfrm(dest: *mut wchar_t, src: *const wchar_t, n: usize) -> usize;
     #[link_name = "wcsdup"]
@@ -219,7 +221,11 @@ fn copy_cat_benches(c: &mut Criterion) {
         wcsncpy_group.bench_with_input(BenchmarkId::new("faststrings", &label), &n, |b, &n| {
             b.iter(|| {
                 dst.copy_from_slice(&template);
-                black_box(fast_wcsncpy(black_box(&mut dst), black_box(&src), black_box(n)));
+                black_box(fast_wcsncpy(
+                    black_box(&mut dst),
+                    black_box(&src),
+                    black_box(n),
+                ));
                 black_box(unsafe { core::ptr::read_volatile(dst.as_ptr()) });
             });
         });
@@ -276,7 +282,11 @@ fn copy_cat_benches(c: &mut Criterion) {
         wcpncpy_group.bench_with_input(BenchmarkId::new("faststrings", &label), &n, |b, &n| {
             b.iter(|| {
                 dst.copy_from_slice(&template);
-                black_box(fast_wcpncpy(black_box(&mut dst), black_box(&src), black_box(n)));
+                black_box(fast_wcpncpy(
+                    black_box(&mut dst),
+                    black_box(&src),
+                    black_box(n),
+                ));
                 black_box(unsafe { core::ptr::read_volatile(dst.as_ptr()) });
             });
         });
@@ -337,7 +347,11 @@ fn copy_cat_benches(c: &mut Criterion) {
         wcsncat_group.bench_with_input(BenchmarkId::new("faststrings", &label), &n, |b, &n| {
             b.iter(|| {
                 dst.copy_from_slice(&template);
-                black_box(fast_wcsncat(black_box(&mut dst), black_box(&src), black_box(n)));
+                black_box(fast_wcsncat(
+                    black_box(&mut dst),
+                    black_box(&src),
+                    black_box(n),
+                ));
                 black_box(unsafe { core::ptr::read_volatile(dst.as_ptr()) });
             });
         });
@@ -427,7 +441,10 @@ fn cmp_benches(c: &mut Criterion) {
         wcscmp_group.throughput(Throughput::Bytes(bytes_for(len / 2 + 1)));
         wcscmp_group.bench_with_input(BenchmarkId::new("glibc", &label), &len, |b, _| {
             b.iter(|| unsafe {
-                black_box(libc_wcscmp(black_box(lhs.as_ptr()), black_box(rhs.as_ptr())));
+                black_box(libc_wcscmp(
+                    black_box(lhs.as_ptr()),
+                    black_box(rhs.as_ptr()),
+                ));
             });
         });
         wcscmp_group.bench_with_input(BenchmarkId::new("faststrings", &label), &len, |b, _| {
@@ -474,7 +491,10 @@ fn cmp_benches(c: &mut Criterion) {
         wcscoll_group.throughput(Throughput::Bytes(bytes_for(len / 2 + 1)));
         wcscoll_group.bench_with_input(BenchmarkId::new("glibc", &label), &len, |b, _| {
             b.iter(|| unsafe {
-                black_box(libc_wcscoll(black_box(lhs.as_ptr()), black_box(rhs.as_ptr())));
+                black_box(libc_wcscoll(
+                    black_box(lhs.as_ptr()),
+                    black_box(rhs.as_ptr()),
+                ));
             });
         });
         wcscoll_group.bench_with_input(BenchmarkId::new("faststrings", &label), &len, |b, _| {
@@ -500,15 +520,11 @@ fn cmp_benches(c: &mut Criterion) {
                 ));
             });
         });
-        wcscasecmp_group.bench_with_input(
-            BenchmarkId::new("faststrings", &label),
-            &len,
-            |b, _| {
-                b.iter(|| {
-                    black_box(fast_wcscasecmp(black_box(&lhs), black_box(&rhs)));
-                });
-            },
-        );
+        wcscasecmp_group.bench_with_input(BenchmarkId::new("faststrings", &label), &len, |b, _| {
+            b.iter(|| {
+                black_box(fast_wcscasecmp(black_box(&lhs), black_box(&rhs)));
+            });
+        });
     }
     wcscasecmp_group.finish();
 
@@ -529,15 +545,15 @@ fn cmp_benches(c: &mut Criterion) {
                 ));
             });
         });
-        wcsncasecmp_group.bench_with_input(
-            BenchmarkId::new("faststrings", &label),
-            &n,
-            |b, &n| {
-                b.iter(|| {
-                    black_box(fast_wcsncasecmp(black_box(&lhs), black_box(&rhs), black_box(n)));
-                });
-            },
-        );
+        wcsncasecmp_group.bench_with_input(BenchmarkId::new("faststrings", &label), &n, |b, &n| {
+            b.iter(|| {
+                black_box(fast_wcsncasecmp(
+                    black_box(&lhs),
+                    black_box(&rhs),
+                    black_box(n),
+                ));
+            });
+        });
     }
     wcsncasecmp_group.finish();
 }
@@ -558,7 +574,11 @@ fn search_benches(c: &mut Criterion) {
             b.iter(|| unsafe {
                 let base = s.as_ptr() as usize;
                 let p = libc_wcschr(black_box(s.as_ptr()), black_box(target));
-                let rv = if p.is_null() { usize::MAX } else { (p as usize) - base };
+                let rv = if p.is_null() {
+                    usize::MAX
+                } else {
+                    (p as usize) - base
+                };
                 black_box(rv);
             });
         });
@@ -583,7 +603,11 @@ fn search_benches(c: &mut Criterion) {
             b.iter(|| unsafe {
                 let base = s.as_ptr() as usize;
                 let p = libc_wcsrchr(black_box(s.as_ptr()), black_box(target));
-                let rv = if p.is_null() { usize::MAX } else { (p as usize) - base };
+                let rv = if p.is_null() {
+                    usize::MAX
+                } else {
+                    (p as usize) - base
+                };
                 black_box(rv);
             });
         });
@@ -609,22 +633,24 @@ fn search_benches(c: &mut Criterion) {
                 black_box((p as usize) - base);
             });
         });
-        wcschrnul_group.bench_with_input(
-            BenchmarkId::new("faststrings", &label),
-            &len,
-            |b, _| {
-                b.iter(|| {
-                    black_box(fast_wcschrnul(black_box(&s), black_box(target)));
-                });
-            },
-        );
+        wcschrnul_group.bench_with_input(BenchmarkId::new("faststrings", &label), &len, |b, _| {
+            b.iter(|| {
+                black_box(fast_wcschrnul(black_box(&s), black_box(target)));
+            });
+        });
     }
     wcschrnul_group.finish();
 
     let mut wcsstr_group = c.benchmark_group("wcsstr");
     for len in sizes {
         let mut hay = make_wide_c_string(len);
-        let needle = vec![b'q' as wchar_t, b'r' as wchar_t, b's' as wchar_t, b't' as wchar_t, 0];
+        let needle = vec![
+            b'q' as wchar_t,
+            b'r' as wchar_t,
+            b's' as wchar_t,
+            b't' as wchar_t,
+            0,
+        ];
         let pos = len / 2;
         hay[pos] = b'q' as wchar_t;
         hay[pos + 1] = b'r' as wchar_t;
@@ -637,7 +663,11 @@ fn search_benches(c: &mut Criterion) {
             b.iter(|| unsafe {
                 let base = hay.as_ptr() as usize;
                 let p = libc_wcsstr(black_box(hay.as_ptr()), black_box(needle.as_ptr()));
-                let rv = if p.is_null() { usize::MAX } else { (p as usize) - base };
+                let rv = if p.is_null() {
+                    usize::MAX
+                } else {
+                    (p as usize) - base
+                };
                 black_box(rv);
             });
         });
@@ -722,7 +752,11 @@ fn search_benches(c: &mut Criterion) {
             b.iter(|| unsafe {
                 let base = s.as_ptr() as usize;
                 let p = libc_wcspbrk(black_box(s.as_ptr()), black_box(accept.as_ptr()));
-                let rv = if p.is_null() { usize::MAX } else { (p as usize) - base };
+                let rv = if p.is_null() {
+                    usize::MAX
+                } else {
+                    (p as usize) - base
+                };
                 black_box(rv);
             });
         });
@@ -759,8 +793,11 @@ fn misc_benches(c: &mut Criterion) {
                 work.copy_from_slice(&template);
                 let mut save: *mut wchar_t = core::ptr::null_mut();
                 let mut count = 0usize;
-                let mut tok =
-                    libc_wcstok(black_box(work.as_mut_ptr()), black_box(delim.as_ptr()), &mut save);
+                let mut tok = libc_wcstok(
+                    black_box(work.as_mut_ptr()),
+                    black_box(delim.as_ptr()),
+                    &mut save,
+                );
                 while !tok.is_null() {
                     count += 1;
                     tok = libc_wcstok(core::ptr::null_mut(), black_box(delim.as_ptr()), &mut save);
@@ -773,7 +810,8 @@ fn misc_benches(c: &mut Criterion) {
             b.iter(|| {
                 let mut save = 0usize;
                 let mut count = 0usize;
-                while let Some(tok) = fast_wcstok(black_box(&template), black_box(&delim), &mut save)
+                while let Some(tok) =
+                    fast_wcstok(black_box(&template), black_box(&delim), &mut save)
                 {
                     black_box(tok.len());
                     count += 1;

@@ -152,7 +152,7 @@ pub(crate) fn lookup_error_message(errnum: i32) -> Option<&'static [u8]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{strerror, UNKNOWN_ERROR_MESSAGE};
+    use super::{UNKNOWN_ERROR_MESSAGE, strerror};
 
     #[test]
     fn test_strerror_known_values() {

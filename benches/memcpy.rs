@@ -1,136 +1,84 @@
 use core::ffi::c_void;
 use criterion::{
-    AxisScale, BenchmarkId, Criterion, PlotConfiguration, Throughput, black_box, criterion_group,
-    criterion_main,
+    BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
 };
 use faststrings::memcpy::optimized_memcpy_unified;
-use std::time::Duration;
 
-#[path = "original_memcpy.rs"]
-mod original;
-use original::optimized_memcpy_unified as original_optimized_memcpy_unified;
+#[path = "bench_support.rs"]
+mod support;
+use support::{AlignedBuffer, flush_range};
 
 unsafe extern "C" {
     #[link_name = "memcpy"]
     fn libc_memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
 }
 
-#[derive(Clone)]
-struct CopyCase {
-    label: String,
+#[derive(Clone, Copy)]
+enum Implementation {
+    Glibc,
+    Faststrings,
+}
+
+#[inline(always)]
+unsafe fn copy(implementation: Implementation, dst: *mut u8, src: *const u8, len: usize) {
+    match implementation {
+        Implementation::Glibc => unsafe {
+            libc_memcpy(dst.cast(), src.cast(), len);
+        },
+        Implementation::Faststrings => unsafe {
+            optimized_memcpy_unified(dst, src, len);
+        },
+    }
+    black_box(unsafe { core::ptr::read_volatile(dst) });
+}
+
+fn fixed_case(
+    c: &mut Criterion,
+    group_name: &str,
+    label: &str,
     len: usize,
     src_off: usize,
     dst_off: usize,
-}
-
-fn configure_group_for_len(
-    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
-    len: usize,
-) {
-    if len >= 1 << 20 {
-        group.sample_size(20);
-        group.warm_up_time(Duration::from_millis(300));
-        group.measurement_time(Duration::from_millis(900));
-    } else if len >= 1 << 16 {
-        group.sample_size(30);
-        group.warm_up_time(Duration::from_millis(250));
-        group.measurement_time(Duration::from_millis(700));
-    } else {
-        group.sample_size(40);
-        group.warm_up_time(Duration::from_millis(200));
-        group.measurement_time(Duration::from_millis(500));
-    }
-}
-
-fn run_memcpy_cases(
-    c: &mut Criterion,
-    group_name: &str,
-    cases: &[CopyCase],
-    plot_scale: AxisScale,
 ) {
     let mut group = c.benchmark_group(group_name);
-    group.plot_config(PlotConfiguration::default().summary_scale(plot_scale));
-
-    for case in cases {
-        let len = case.len;
-        let src_off = case.src_off;
-        let dst_off = case.dst_off;
-
-        let alloc_len = len + 64;
-        let mut src = vec![0u8; alloc_len];
-        let mut dst = vec![0u8; alloc_len];
-        for (i, byte) in src.iter_mut().enumerate() {
-            *byte = (i % 251) as u8;
-        }
-
-        let src_ptr = unsafe { src.as_ptr().add(src_off) };
-        let dst_ptr = unsafe { dst.as_mut_ptr().add(dst_off) };
-
-        configure_group_for_len(&mut group, len);
-        group.throughput(Throughput::Bytes(len as u64));
-
-        group.bench_with_input(BenchmarkId::new("glibc", &case.label), &len, |b, &n| {
+    group.throughput(Throughput::Bytes(len as u64));
+    let mut src = AlignedBuffer::new(len + src_off + 4096, 4096);
+    let mut dst = AlignedBuffer::new(len + dst_off + 4096, 4096);
+    let src_ptr = src.ptr(src_off);
+    let dst_ptr = dst.mut_ptr(dst_off);
+    for (name, implementation) in [
+        ("glibc", Implementation::Glibc),
+        ("faststrings", Implementation::Faststrings),
+    ] {
+        group.bench_function(BenchmarkId::new(name, label), |b| {
             b.iter(|| unsafe {
-                libc_memcpy(
-                    black_box(dst_ptr as *mut c_void),
-                    black_box(src_ptr as *const c_void),
-                    black_box(n),
-                );
-                black_box(core::ptr::read_volatile(dst_ptr));
-            });
-        });
-
-        group.bench_with_input(
-            BenchmarkId::new("faststrings", &case.label),
-            &len,
-            |b, &n| {
-                b.iter(|| unsafe {
-                    optimized_memcpy_unified(black_box(dst_ptr), black_box(src_ptr), black_box(n));
-                    black_box(core::ptr::read_volatile(dst_ptr));
-                });
-            },
-        );
-
-        group.bench_with_input(BenchmarkId::new("original", &case.label), &len, |b, &n| {
-            b.iter(|| unsafe {
-                original_optimized_memcpy_unified(
+                copy(
+                    implementation,
                     black_box(dst_ptr),
                     black_box(src_ptr),
-                    black_box(n),
+                    black_box(len),
                 );
-                black_box(core::ptr::read_volatile(dst_ptr));
-            });
+            })
         });
     }
-
+    black_box((&mut src, &mut dst));
     group.finish();
 }
 
-fn memcpy_benches(c: &mut Criterion) {
-    let mut size_cases = Vec::new();
-
-    // Size sweep includes threshold boundaries and cliff zones.
-    let sizes = [
+fn hot_and_threshold_benches(c: &mut Criterion) {
+    for &len in &[
         1usize,
-        2,
-        3,
-        4,
         7,
-        8,
-        15,
         16,
         31,
         32,
+        62,
         63,
         64,
         65,
-        95,
-        96,
         127,
         128,
         129,
-        191,
-        192,
         255,
         256,
         257,
@@ -139,47 +87,128 @@ fn memcpy_benches(c: &mut Criterion) {
         513,
         1023,
         1024,
-        4095,
+        1025,
         4096,
-        65535,
         65536,
-        262143,
         262144,
-        262145,
-        (8 * 1024 * 1024) - 1,
-        8 * 1024 * 1024,
-        (8 * 1024 * 1024) + 1,
-    ];
-
-    for len in sizes {
-        size_cases.push(CopyCase {
-            label: format!("size_{len}"),
-            len,
-            src_off: 0,
-            dst_off: 0,
-        });
+        16 * 1024 * 1024 - 1,
+        16 * 1024 * 1024,
+        16 * 1024 * 1024 + 1,
+    ] {
+        fixed_case(c, "memcpy_hot_fixed", &format!("size_{len}"), len, 0, 0);
     }
 
-    run_memcpy_cases(c, "memcpy_size", &size_cases, AxisScale::Logarithmic);
+    // Deterministic randomized points around each implementation dispatch cliff.
+    let mut state = 0x9e37_79b9_u32;
+    for threshold in [63usize, 128, 256, 512, 1024, 16 * 1024 * 1024] {
+        for sample in 0..3 {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            let radius = if threshold > 4096 { 4096 } else { 15 };
+            let delta = (state as usize % (radius * 2 + 1)) as isize - radius as isize;
+            let len = threshold.saturating_add_signed(delta).max(1);
+            fixed_case(
+                c,
+                "memcpy_random_thresholds",
+                &format!("t{threshold}_sample{sample}_size{len}"),
+                len,
+                0,
+                0,
+            );
+        }
+    }
+}
 
-    // Alignment sweep at representative cliff sizes.
-    let mut align_cases = Vec::new();
-    let align_sizes = [63usize, 64, 65, 256, 257, 4096];
-    let align_pairs = [(0usize, 0usize), (1, 1), (15, 7), (31, 17)];
-
-    for len in align_sizes {
-        for (src_off, dst_off) in align_pairs {
-            align_cases.push(CopyCase {
-                label: format!("align_len{len}_s{src_off}_d{dst_off}"),
+fn alignment_and_page_benches(c: &mut Criterion) {
+    for &len in &[64usize, 257, 4096] {
+        for &(src_off, dst_off) in &[(0usize, 0usize), (0, 1), (1, 0), (7, 31), (31, 7), (63, 32)] {
+            fixed_case(
+                c,
+                "memcpy_alignment",
+                &format!("len{len}_s{src_off}_d{dst_off}"),
                 len,
                 src_off,
                 dst_off,
-            });
+            );
         }
     }
-
-    run_memcpy_cases(c, "memcpy_alignment", &align_cases, AxisScale::Linear);
+    for &(label, len, src_off, dst_off) in &[
+        ("end_at_page", 256usize, 4096 - 256, 4096 - 256),
+        ("cross_page_src", 256, 4096 - 127, 0),
+        ("cross_page_dst", 256, 0, 4096 - 127),
+        ("cross_both_different", 256, 4096 - 31, 4096 - 191),
+    ] {
+        fixed_case(c, "memcpy_page_boundaries", label, len, src_off, dst_off);
+    }
 }
 
-criterion_group!(benches, memcpy_benches);
+fn rotating_working_sets(c: &mut Criterion) {
+    for &(label, working_set, chunk) in &[
+        ("l1_32k", 32 * 1024usize, 256usize),
+        ("l2_1m", 1024 * 1024, 4096),
+        ("llc_32m", 32 * 1024 * 1024, 64 * 1024),
+        ("stream_128m", 128 * 1024 * 1024, 1024 * 1024),
+    ] {
+        let mut group = c.benchmark_group("memcpy_rotating_working_set");
+        group.throughput(Throughput::Bytes(chunk as u64));
+        let src = AlignedBuffer::new(working_set + 64, 64);
+        let mut dst = AlignedBuffer::new(working_set + 64, 64);
+        let slots = working_set / chunk;
+        for (name, implementation) in [
+            ("glibc", Implementation::Glibc),
+            ("faststrings", Implementation::Faststrings),
+        ] {
+            let mut index = 0usize;
+            group.bench_function(BenchmarkId::new(name, label), |b| {
+                b.iter(|| unsafe {
+                    let off = index * chunk;
+                    copy(implementation, dst.mut_ptr(off), src.ptr(off), chunk);
+                    index += 1;
+                    if index == slots {
+                        index = 0;
+                    }
+                })
+            });
+        }
+        group.finish();
+    }
+}
+
+fn cold_benches(c: &mut Criterion) {
+    for &len in &[64usize, 4096, 256 * 1024] {
+        let mut group = c.benchmark_group("memcpy_cold_flushed");
+        group.throughput(Throughput::Bytes(len as u64));
+        let src = AlignedBuffer::new(len, 64);
+        let mut dst = AlignedBuffer::new(len, 64);
+        let src_ptr = src.ptr(0);
+        let dst_ptr = dst.mut_ptr(0);
+        for (name, implementation) in [
+            ("glibc", Implementation::Glibc),
+            ("faststrings", Implementation::Faststrings),
+        ] {
+            group.bench_function(BenchmarkId::new(name, format!("size_{len}")), |b| {
+                b.iter_batched(
+                    || unsafe {
+                        flush_range(src_ptr, len);
+                        flush_range(dst_ptr, len);
+                    },
+                    |_| unsafe {
+                        copy(implementation, dst_ptr, src_ptr, len);
+                    },
+                    BatchSize::PerIteration,
+                )
+            });
+        }
+        group.finish();
+    }
+}
+
+criterion_group!(
+    benches,
+    hot_and_threshold_benches,
+    alignment_and_page_benches,
+    rotating_working_sets,
+    cold_benches
+);
 criterion_main!(benches);

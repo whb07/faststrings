@@ -1,6 +1,6 @@
 //! POSIX-style `strerror_r` implementation.
 
-use crate::strerror::{lookup_error_message, UNKNOWN_ERROR_MESSAGE};
+use crate::strerror::{UNKNOWN_ERROR_MESSAGE, lookup_error_message};
 
 /// POSIX `EINVAL`.
 pub const EINVAL: i32 = 22;
@@ -38,7 +38,7 @@ pub fn strerror_r(errnum: i32, buf: &mut [u8]) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{strerror_r, EINVAL, ERANGE};
+    use super::{EINVAL, ERANGE, strerror_r};
 
     #[test]
     fn test_strerror_r_success() {

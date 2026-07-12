@@ -1,5 +1,5 @@
 use core::ffi::c_void;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use faststrings::mem::{
     bcmp as fast_bcmp, bzero as fast_bzero, explicit_bzero as fast_explicit_bzero,
 };

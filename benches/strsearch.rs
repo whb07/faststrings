@@ -1,8 +1,8 @@
 use core::ffi::c_char;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use faststrings::search::{
     strcasestr as fast_strcasestr, strcspn as fast_strcspn, strpbrk as fast_strpbrk,
-    strstr as fast_strstr, strspn as fast_strspn,
+    strspn as fast_strspn, strstr as fast_strstr,
 };
 use std::time::Duration;
 

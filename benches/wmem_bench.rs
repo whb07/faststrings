@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use faststrings::types::wchar_t;
 use faststrings::wmem::{
     wmemchr as fast_wmemchr, wmemcmp as fast_wmemcmp, wmemcpy as fast_wmemcpy,
@@ -292,7 +292,9 @@ fn wmemrchr_benches(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("scalar", &label), &len, |b, _| {
             b.iter(|| {
-                black_box(scalar_wmemrchr(black_box(&hay), black_box(target)).unwrap_or(usize::MAX));
+                black_box(
+                    scalar_wmemrchr(black_box(&hay), black_box(target)).unwrap_or(usize::MAX),
+                );
             });
         });
 

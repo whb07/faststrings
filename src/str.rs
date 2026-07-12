@@ -3,9 +3,9 @@
 //! Safe Rust implementations of C string functions. These operate on byte slices
 //! and treat 0 (null byte) as the string terminator.
 
+use crate::memchr::optimized_memchr_unified;
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
-use crate::memchr::optimized_memchr_unified;
 
 #[inline(always)]
 fn has_zero_byte(word: usize) -> bool {

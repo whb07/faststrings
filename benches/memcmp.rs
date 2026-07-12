@@ -69,7 +69,9 @@ fn memcmp_benches(c: &mut Criterion) {
         });
     }
 
-    let diff_position_sizes = [1usize, 8, 64, 65, 128, 129, 256, 257, 512, 513, 1024, 4096, 65536, 262144];
+    let diff_position_sizes = [
+        1usize, 8, 64, 65, 128, 129, 256, 257, 512, 513, 1024, 4096, 65536, 262144,
+    ];
     for len in diff_position_sizes {
         cases.push(CompareCase {
             label: format!("size_{len}_diff_first"),
@@ -155,12 +157,20 @@ fn memcmp_benches(c: &mut Criterion) {
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("faststrings", &case.label), &len, |b, &n| {
-            b.iter(|| unsafe {
-                let r = optimized_memcmp_unified(black_box(s1_ptr), black_box(s2_ptr), black_box(n));
-                black_box(r);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("faststrings", &case.label),
+            &len,
+            |b, &n| {
+                b.iter(|| unsafe {
+                    let r = optimized_memcmp_unified(
+                        black_box(s1_ptr),
+                        black_box(s2_ptr),
+                        black_box(n),
+                    );
+                    black_box(r);
+                });
+            },
+        );
     }
 
     group.finish();

@@ -219,8 +219,9 @@ mod tests {
 
         for a_off in 0..32 {
             for b_off in 0..32 {
-                for n in [1usize, 7, 8, 15, 16, 31, 32, 63, 64, 65, 127, 128, 129, 255, 256, 257]
-                {
+                for n in [
+                    1usize, 7, 8, 15, 16, 31, 32, 63, 64, 65, 127, 128, 129, 255, 256, 257,
+                ] {
                     let a = &a_full[a_off..a_off + n];
                     let mut b = b_full;
                     let s = &mut b[b_off..b_off + n];

@@ -466,6 +466,47 @@ unsafe fn optimized_memcpy_avx2_large(dest: *mut u8, src: *const u8, n: usize) -
         rem -= advance;
     }
 
+    // Prefetch pays off only once the copy clearly spills L2. At 256KiB the
+    // src+dst working set already equals a 512KiB L2 and prefetch just adds
+    // contention, so gate above it; smaller copies keep the plain loop.
+    if n > 512 * 1024 {
+        while rem >= 256 {
+            // ~3 iterations ahead into L1 (T0). Prefetches never fault, so
+            // running past the buffer end on final iterations is harmless.
+            _mm_prefetch(s.add(768) as *const i8, _MM_HINT_T0);
+            _mm_prefetch(s.add(832) as *const i8, _MM_HINT_T0);
+            _mm_prefetch(s.add(896) as *const i8, _MM_HINT_T0);
+            _mm_prefetch(s.add(960) as *const i8, _MM_HINT_T0);
+
+            let a0 = _mm256_loadu_si256(s as *const __m256i);
+            let a1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
+            let a2 = _mm256_loadu_si256(s.add(64) as *const __m256i);
+            let a3 = _mm256_loadu_si256(s.add(96) as *const __m256i);
+            let a4 = _mm256_loadu_si256(s.add(128) as *const __m256i);
+            let a5 = _mm256_loadu_si256(s.add(160) as *const __m256i);
+            let a6 = _mm256_loadu_si256(s.add(192) as *const __m256i);
+            let a7 = _mm256_loadu_si256(s.add(224) as *const __m256i);
+
+            // SAFETY: Aligned stores require 32-byte alignment; `d` is aligned
+            // by the prologue and advances in 32-byte multiples.
+            _mm256_store_si256(d as *mut __m256i, a0);
+            _mm256_store_si256(d.add(32) as *mut __m256i, a1);
+            _mm256_store_si256(d.add(64) as *mut __m256i, a2);
+            _mm256_store_si256(d.add(96) as *mut __m256i, a3);
+            _mm256_store_si256(d.add(128) as *mut __m256i, a4);
+            _mm256_store_si256(d.add(160) as *mut __m256i, a5);
+            _mm256_store_si256(d.add(192) as *mut __m256i, a6);
+            _mm256_store_si256(d.add(224) as *mut __m256i, a7);
+
+            d = d.add(256);
+            s = s.add(256);
+            rem -= 256;
+        }
+
+        copy_remainder_avx2(d, s, rem);
+        return dest;
+    }
+
     while rem >= 256 {
         let a0 = _mm256_loadu_si256(s as *const __m256i);
         let a1 = _mm256_loadu_si256(s.add(32) as *const __m256i);
